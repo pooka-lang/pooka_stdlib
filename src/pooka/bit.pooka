@@ -1,0 +1,151 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// Bits are tiny lamps; each one has a numbered switch.
+////
+//// Use arbitrary-width integer bitwise operations. Checked shifts and bit
+//// positions reject negative counts. Right shift is arithmetic, so negative
+//// integers keep their sign.
+////
+//// ```pooka
+//// import pooka/bit
+////
+//// assert bit.set(0, 3) == Ok(8)
+//// ```
+
+module bit
+
+enum BitError {
+  NegativeCount,
+  NegativePosition
+}
+
+external _Bit from erlang "erlang" {
+  band(a: Int, b: Int) -> Int
+
+  bor(a: Int, b: Int) -> Int
+
+  bxor(a: Int, b: Int) -> Int
+
+  bnot(value: Int) -> Int
+
+  bsl(value: Int, count: Int) -> Int
+
+  bsr(value: Int, count: Int) -> Int
+}
+
+/// Keep the bit positions set in both integers.
+///
+/// ```pooka
+/// import pooka/bit
+///
+/// assert bit.and(6, 3) == 2
+/// ```
+and(a: Int, b: Int) -> Int {
+  _Bit.band(a, b)
+}
+
+/// Keep the bit positions set in either integer.
+///
+/// ```pooka
+/// import pooka/bit
+///
+/// assert bit.or(4, 2) == 6
+/// ```
+or(a: Int, b: Int) -> Int {
+  _Bit.bor(a, b)
+}
+
+/// Keep the bit positions set in exactly one integer.
+///
+/// ```pooka
+/// import pooka/bit
+///
+/// assert bit.xor(6, 3) == 5
+/// ```
+xor(a: Int, b: Int) -> Int {
+  _Bit.bxor(a, b)
+}
+
+/// Complement the integer's bits using Erlang integer bit semantics.
+///
+/// ```pooka
+/// import pooka/bit
+///
+/// assert bit.not(0) == -1
+/// ```
+not(value: Int) -> Int {
+  _Bit.bnot(value)
+}
+
+/// Shift left by a nonnegative count, or return NegativeCount.
+///
+/// ```pooka
+/// import pooka/bit
+///
+/// assert bit.shift_left(1, 3) == Ok(8)
+/// ```
+shift_left(value: Int, count: Int) -> Result(Int, BitError) {
+  match count < 0 {
+    True -> Error(BitError.NegativeCount)
+    False -> Ok(_Bit.bsl(value, count))
+  }
+}
+
+/// Arithmetic-shift right by a nonnegative count, preserving the sign.
+///
+/// ```pooka
+/// import pooka/bit
+///
+/// assert bit.shift_right(-8, 1) == Ok(-4)
+/// ```
+shift_right(value: Int, count: Int) -> Result(Int, BitError) {
+  match count < 0 {
+    True -> Error(BitError.NegativeCount)
+    False -> Ok(_Bit.bsr(value, count))
+  }
+}
+
+/// Validate the bit position before shifting one into its mask. Keep negative
+/// positions out of the Erlang shift primitive.
+_mask(position: Int) -> Result(Int, BitError) {
+  match position < 0 {
+    True -> Error(BitError.NegativePosition)
+    False -> Ok(_Bit.bsl(1, position))
+  }
+}
+
+/// Check a zero-based bit position. Negative positions return NegativePosition.
+///
+/// ```pooka
+/// import pooka/bit
+///
+/// assert bit.is_set(8, 3) == Ok(True)
+/// ```
+is_set(value: Int, position: Int) -> Result(Bool, BitError) {
+  let mask = _mask(position)?
+  Ok(and(value, mask) != 0)
+}
+
+/// Switch on one zero-based bit, returning a new integer.
+///
+/// ```pooka
+/// import pooka/bit
+///
+/// assert bit.set(0, 3) == Ok(8)
+/// ```
+set(value: Int, position: Int) -> Result(Int, BitError) {
+  let mask = _mask(position)?
+  Ok(or(value, mask))
+}
+
+/// Switch off one zero-based bit, returning a new integer.
+///
+/// ```pooka
+/// import pooka/bit
+///
+/// assert bit.clear(10, 1) == Ok(8)
+/// ```
+clear(value: Int, position: Int) -> Result(Int, BitError) {
+  let mask = _mask(position)?
+  Ok(and(value, not(mask)))
+}
