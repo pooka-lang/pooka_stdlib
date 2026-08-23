@@ -1,0 +1,131 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// A bit array is a parcel whose wrapping need not end on a byte boundary.
+////
+//// Build bitstrings, concatenate parts and convert UTF-8 text. Size operations
+//// distinguish bits from bytes. Byte slicing and text decoding report their
+//// public error variants for the supported invalid-input cases.
+////
+//// ```pooka
+//// import pooka/bit_array
+////
+//// assert bit_array.bit_size(<<1:size(3)>>) == 3
+//// ```
+
+module bit_array
+
+enum BitArrayError {
+  OutOfRange,
+  InvalidUtf8
+}
+
+external _Bits from erlang "pooka_stdlib_ffi" {
+  bits_byte_size(bits: BitArray) -> Int
+
+  bits_bit_size(bits: BitArray) -> Int
+
+  bits_concat(parts: List(BitArray)) -> BitArray
+
+  bits_slice(bits: BitArray, start: Int, length: Int) -> Result(BitArray, Nil)
+
+  bits_to_string(bits: BitArray) -> Result(String, Nil)
+}
+
+/// Return the runtime byte size; a partial final byte still occupies a byte of
+/// size.
+///
+/// ```pooka
+/// import pooka/bit_array
+///
+/// assert bit_array.byte_size(<<1:size(3)>>) == 1
+/// ```
+byte_size(bits: BitArray) -> Int {
+  _Bits.bits_byte_size(bits)
+}
+
+/// Count every bit, including a non-byte-aligned suffix.
+///
+/// ```pooka
+/// import pooka/bit_array
+///
+/// assert bit_array.bit_size(<<1:size(3)>>) == 3
+/// ```
+bit_size(bits: BitArray) -> Int {
+  _Bits.bits_bit_size(bits)
+}
+
+/// Ask whether there are no bits.
+///
+/// ```pooka
+/// import pooka/bit_array
+///
+/// assert bit_array.is_empty(<<>>)
+/// ```
+is_empty(bits: BitArray) -> Bool {
+  bit_size(bits) == 0
+}
+
+/// Concatenate two bit arrays, preserving all bits in order.
+///
+/// ```pooka
+/// import pooka/bit_array
+///
+/// assert bit_array.append(<<1>>, <<2>>) == <<1, 2>>
+/// ```
+append(first: BitArray, second: BitArray) -> BitArray {
+  <<first:bits, second:bits>>
+}
+
+/// Concatenate all parts, including non-byte-aligned pieces.
+///
+/// ```pooka
+/// import pooka/bit_array
+///
+/// assert bit_array.concat([<<1>>, <<2>>]) == <<1, 2>>
+/// ```
+concat(parts: List(BitArray)) -> BitArray {
+  _Bits.bits_concat(parts)
+}
+
+/// Select a byte range from a whole-byte array. Invalid bounds return
+/// OutOfRange.
+///
+/// ```pooka
+/// import pooka/bit_array
+///
+/// assert bit_array.slice(<<1, 2, 3>>, 1, 1) == Ok(<<2>>)
+/// ```
+slice(bits: BitArray, start: Int, length: Int) -> Result(
+  BitArray,
+  BitArrayError
+) {
+  match _Bits.bits_slice(bits, start, length) {
+    Ok(part) -> Ok(part)
+    Error(_) -> Error(BitArrayError.OutOfRange)
+  }
+}
+
+/// Keep the UTF-8 bytes of a Pooka string.
+///
+/// ```pooka
+/// import pooka/bit_array
+///
+/// assert bit_array.from_string("A") == <<65>>
+/// ```
+from_string(text: String) -> BitArray {
+  <<text:utf8>>
+}
+
+/// Decode UTF-8 bytes, returning InvalidUtf8 when decoding fails.
+///
+/// ```pooka
+/// import pooka/bit_array
+///
+/// assert bit_array.to_string(<<65>>) == Ok("A")
+/// ```
+to_string(bits: BitArray) -> Result(String, BitArrayError) {
+  match _Bits.bits_to_string(bits) {
+    Ok(text) -> Ok(text)
+    Error(_) -> Error(BitArrayError.InvalidUtf8)
+  }
+}
