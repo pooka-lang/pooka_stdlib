@@ -1,0 +1,59 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// Two small answers are sometimes enough.
+////
+//// Convert Boolean values to their Pooka spellings and parse exactly those
+//// spellings. Parsing is case-sensitive: other text produces InvalidBoolean
+//// rather than a guess.
+////
+//// ```pooka
+//// import pooka/bool
+////
+//// assert bool.parse("True") == Ok(True)
+//// ```
+
+module bool
+
+enum ParseError {
+  InvalidBoolean
+}
+
+/// Use the language's capitalized Boolean spelling.
+///
+/// ```pooka
+/// import pooka/bool
+///
+/// assert bool.to_string(True) == "True"
+/// ```
+to_string(value: Bool) -> String {
+  match value {
+    True -> "True"
+    False -> "False"
+  }
+}
+
+/// Accept exactly True or False, preserving case.
+///
+/// ```pooka
+/// import pooka/bool
+///
+/// assert bool.parse("False") == Ok(False)
+/// ```
+parse(text: String) -> Result(Bool, ParseError) {
+  match text {
+    "True" -> Ok(True)
+    "False" -> Ok(False)
+    _ -> Error(ParseError.InvalidBoolean)
+  }
+}
+
+/// Return the opposite Boolean value.
+///
+/// ```pooka
+/// import pooka/bool
+///
+/// assert bool.not(True) == False
+/// ```
+not(value: Bool) -> Bool {
+  !value
+}
