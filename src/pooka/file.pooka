@@ -1,0 +1,215 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// Files are the workshop notebooks that stay after the process goes home.
+////
+//// Return filesystem failures as FileError with the relevant path and message.
+//// Text reads validate UTF-8; byte APIs retain the original bytes. Directory
+//// deletion is nonrecursive, while recursive creation tolerates existing
+//// directories.
+////
+//// ```pooka
+//// import pooka/file
+////
+//// let result = file.read("notes.txt")
+//// ```
+
+module file
+
+/// A file failure carrying the details needed by its caller. Keep this value in
+/// Result until a boundary can explain it.
+class FileError(path: String, message: String)
+
+external _Filesystem from erlang "pooka_stdlib_ffi" {
+  file_read(path: String) -> Result(String, String)
+
+  file_read_bytes(path: String) -> Result(BitArray, String)
+
+  file_write(path: String, data: BitArray, append: Bool) -> Result(Nil, String)
+
+  file_text(text: String) -> BitArray
+
+  file_predicate(path: String, kind: Int) -> Result(Bool, String)
+
+  file_action(path: String, kind: Int) -> Result(Nil, String)
+
+  file_copy(source: String, destination: String) -> Result(Nil, String)
+
+  file_rename(source: String, destination: String) -> Result(Nil, String)
+
+  file_list(path: String) -> Result(List(String), String)
+}
+
+/// Translate the foreign error payload into this module's error type while
+/// leaving a successful value unchanged.
+_error(value: Result(a, String), path: String) -> Result(a, FileError) {
+  match value {
+    Ok(x) -> Ok(x)
+    Error(e) -> Error(FileError(path, e))
+  }
+}
+
+/// Read text and validate that its bytes are UTF-8.
+///
+/// ```pooka
+/// import pooka/file
+///
+/// let result = file.read("notes.txt")
+/// ```
+read(path: String) -> Result(String, FileError) {
+  _error(_Filesystem.file_read(path), path)
+}
+
+/// Read the original bytes without UTF-8 decoding.
+///
+/// ```pooka
+/// import pooka/file
+///
+/// let result = file.read_bytes("notes.bin")
+/// ```
+read_bytes(path: String) -> Result(BitArray, FileError) {
+  _error(_Filesystem.file_read_bytes(path), path)
+}
+
+/// Replace a file with the supplied UTF-8 text.
+///
+/// ```pooka
+/// import pooka/file
+///
+/// let result = file.write("notes.txt", "oak")
+/// ```
+write(path: String, text: String) -> Result(Nil, FileError) {
+  write_bytes(path, _Filesystem.file_text(text))
+}
+
+/// Replace a file with whole-byte data; non-byte-aligned input is rejected.
+///
+/// ```pooka
+/// import pooka/file
+///
+/// let result = file.write_bytes("notes.bin", <<1, 2, 3>>)
+/// ```
+write_bytes(path: String, data: BitArray) -> Result(Nil, FileError) {
+  _error(_Filesystem.file_write(path, data, False), path)
+}
+
+/// Append UTF-8 text to a file.
+///
+/// ```pooka
+/// import pooka/file
+///
+/// let result = file.append("notes.txt", "pine")
+/// ```
+append(path: String, text: String) -> Result(Nil, FileError) {
+  _error(_Filesystem.file_write(path, _Filesystem.file_text(text), True), path)
+}
+
+/// Test existence. A missing path returns Ok(False); other filesystem errors
+/// retain their detail.
+///
+/// ```pooka
+/// import pooka/file
+///
+/// let result = file.exists("notes.txt")
+/// ```
+exists(path: String) -> Result(Bool, FileError) {
+  _error(_Filesystem.file_predicate(path, 0), path)
+}
+
+/// Check whether a path names a regular file.
+///
+/// ```pooka
+/// import pooka/file
+///
+/// let result = file.is_file("notes.txt")
+/// ```
+is_file(path: String) -> Result(Bool, FileError) {
+  _error(_Filesystem.file_predicate(path, 1), path)
+}
+
+/// Check whether a path names a directory.
+///
+/// ```pooka
+/// import pooka/file
+///
+/// let result = file.is_directory("notes")
+/// ```
+is_directory(path: String) -> Result(Bool, FileError) {
+  _error(_Filesystem.file_predicate(path, 2), path)
+}
+
+/// Delete a file, retaining its path in any FileError.
+///
+/// ```pooka
+/// import pooka/file
+///
+/// let result = file.delete("temporary.txt")
+/// ```
+delete(path: String) -> Result(Nil, FileError) {
+  _error(_Filesystem.file_action(path, 0), path)
+}
+
+/// Copy a file to a destination. Failures identify the source path.
+///
+/// ```pooka
+/// import pooka/file
+///
+/// let result = file.copy("notes.txt", "notes-copy.txt")
+/// ```
+copy(source: String, destination: String) -> Result(Nil, FileError) {
+  _error(_Filesystem.file_copy(source, destination), source)
+}
+
+/// Rename a path. Failures identify the source path.
+///
+/// ```pooka
+/// import pooka/file
+///
+/// let result = file.rename("old-notes.txt", "notes.txt")
+/// ```
+rename(source: String, destination: String) -> Result(Nil, FileError) {
+  _error(_Filesystem.file_rename(source, destination), source)
+}
+
+/// List names in a directory without promising their order.
+///
+/// ```pooka
+/// import pooka/file
+///
+/// let result = file.list_directory("notes")
+/// ```
+list_directory(path: String) -> Result(List(String), FileError) {
+  _error(_Filesystem.file_list(path), path)
+}
+
+/// Create one directory; its parent must already exist.
+///
+/// ```pooka
+/// import pooka/file
+///
+/// let result = file.create_directory("notes")
+/// ```
+create_directory(path: String) -> Result(Nil, FileError) {
+  _error(_Filesystem.file_action(path, 1), path)
+}
+
+/// Create missing parent directories; existing directories are accepted.
+///
+/// ```pooka
+/// import pooka/file
+///
+/// let result = file.create_directories("notes/winter")
+/// ```
+create_directories(path: String) -> Result(Nil, FileError) {
+  _error(_Filesystem.file_action(path, 2), path)
+}
+
+/// Remove an empty directory. This does not recursively delete its contents.
+///
+/// ```pooka
+/// import pooka/file
+///
+/// let result = file.remove_directory("empty-notes")
+/// ```
+remove_directory(path: String) -> Result(Nil, FileError) {
+  _error(_Filesystem.file_action(path, 3), path)
+}
