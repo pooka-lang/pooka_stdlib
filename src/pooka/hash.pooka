@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// Give a byte parcel a short, reproducible fingerprint.
+////
+//// Expose SHA-256 through Erlang crypto. The digest is a bit array of thirty-two
+//// bytes, not a hexadecimal string and not a password-storage scheme.
+////
+//// ```pooka
+//// import pooka/bit_array
+//// import pooka/hash
+////
+//// assert bit_array.byte_size(hash.sha256(bit_array.from_string("hello"))) == 32
+//// ```
+
+module hash
+
+external _Digest from erlang "pooka_stdlib_ffi" {
+  hash_sha256(data: BitArray) -> BitArray
+}
+
+/// Compute a 256-bit SHA-256 digest. The result contains raw digest bytes.
+///
+/// ```pooka
+/// import pooka/bit_array
+/// import pooka/hash
+///
+/// assert bit_array.byte_size(hash.sha256(bit_array.from_string("hello"))) == 32
+/// ```
+sha256(data: BitArray) -> BitArray {
+  _Digest.hash_sha256(data)
+}
