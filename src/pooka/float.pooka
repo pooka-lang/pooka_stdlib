@@ -1,0 +1,214 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// Floating-point numbers measure with a small, honest ruler.
+////
+//// Expose BEAM floating-point operations and fallible numeric conversions.
+//// Parsing, square roots and powers keep failure in Result; rounding operations
+//// return Int. These are floating-point calculations, so decimal identities need
+//// not be exact.
+////
+//// ```pooka
+//// import pooka/float
+////
+//// assert float.floor(-1.2) == -2
+//// ```
+
+module float
+
+/// A float failure carrying the details needed by its caller. Keep this value
+/// in Result until a boundary can explain it.
+class ParseError(text: String)
+
+/// A float failure carrying the details needed by its caller. Keep this value
+/// in Result until a boundary can explain it.
+class MathError(message: String)
+
+external _Floats from erlang "pooka_stdlib_ffi" {
+  float_parse(text: String) -> Result(Float, String)
+
+  float_string(value: Float) -> String
+
+  float_floor(value: Float) -> Int
+
+  float_ceil(value: Float) -> Int
+
+  float_round(value: Float) -> Int
+
+  float_truncate(value: Float) -> Int
+
+  float_sqrt(value: Float) -> Result(Float, String)
+
+  float_pow(base: Float, exponent: Float) -> Result(Float, String)
+}
+
+/// Parse a floating-point value, retaining failure as ParseError.
+///
+/// ```pooka
+/// import pooka/float
+///
+/// assert float.parse("3.0") == Ok(3.0)
+/// ```
+parse(text: String) -> Result(Float, ParseError) {
+  match _Floats.float_parse(text) {
+    Ok(n) -> Ok(n)
+    Error(_) -> Error(ParseError(text))
+  }
+}
+
+/// Render a floating-point value using the library's textual representation.
+///
+/// ```pooka
+/// import pooka/float
+///
+/// let text = float.to_string(3.0)
+/// ```
+to_string(value: Float) -> String {
+  _Floats.float_string(value)
+}
+
+/// Return the nonnegative magnitude.
+///
+/// ```pooka
+/// import pooka/float
+///
+/// assert float.abs(-3.0) == 3.0
+/// ```
+abs(value: Float) -> Float {
+  match value < 0.0 {
+    True -> -value
+    False -> value
+  }
+}
+
+/// Return the smaller value.
+///
+/// ```pooka
+/// import pooka/float
+///
+/// assert float.min(2.0, 3.0) == 2.0
+/// ```
+min(a: Float, b: Float) -> Float {
+  match a < b {
+    True -> a
+    False -> b
+  }
+}
+
+/// Return the larger value.
+///
+/// ```pooka
+/// import pooka/float
+///
+/// assert float.max(2.0, 3.0) == 3.0
+/// ```
+max(a: Float, b: Float) -> Float {
+  match a > b {
+    True -> a
+    False -> b
+  }
+}
+
+/// Keep a value between the bounds; reversed bounds are normalized first.
+///
+/// ```pooka
+/// import pooka/float
+///
+/// assert float.clamp(3.0, -2.0, 2.0) == 2.0
+/// ```
+clamp(value: Float, lower: Float, upper: Float) -> Float {
+  min(max(value, min(lower, upper)), max(lower, upper))
+}
+
+/// Round downward toward negative infinity and return Int.
+///
+/// ```pooka
+/// import pooka/float
+///
+/// assert float.floor(-1.2) == -2
+/// ```
+floor(value: Float) -> Int {
+  _Floats.float_floor(value)
+}
+
+/// Round upward toward positive infinity and return Int.
+///
+/// ```pooka
+/// import pooka/float
+///
+/// assert float.ceil(-1.2) == -1
+/// ```
+ceil(value: Float) -> Int {
+  _Floats.float_ceil(value)
+}
+
+/// Round to the nearest integer using the runtime's rounding rule.
+///
+/// ```pooka
+/// import pooka/float
+///
+/// assert float.round(1.6) == 2
+/// ```
+round(value: Float) -> Int {
+  _Floats.float_round(value)
+}
+
+/// Discard the fractional part toward zero.
+///
+/// ```pooka
+/// import pooka/float
+///
+/// assert float.truncate(-1.8) == -1
+/// ```
+truncate(value: Float) -> Int {
+  _Floats.float_truncate(value)
+}
+
+/// Compute the square root, returning MathError for an unsupported domain.
+///
+/// ```pooka
+/// import pooka/float
+///
+/// assert float.sqrt(9.0) == Ok(3.0)
+/// ```
+sqrt(value: Float) -> Result(Float, MathError) {
+  match _Floats.float_sqrt(value) {
+    Ok(n) -> Ok(n)
+    Error(e) -> Error(MathError(e))
+  }
+}
+
+/// Compute a floating-point power, keeping runtime domain failures in Result.
+///
+/// ```pooka
+/// import pooka/float
+///
+/// assert float.pow(2.0, 3.0) == Ok(8.0)
+/// ```
+pow(base: Float, exponent: Float) -> Result(Float, MathError) {
+  match _Floats.float_pow(base, exponent) {
+    Ok(n) -> Ok(n)
+    Error(e) -> Error(MathError(e))
+  }
+}
+
+/// Apply the library's finite-value predicate to a BEAM float.
+///
+/// ```pooka
+/// import pooka/float
+///
+/// assert float.is_finite(1.0)
+/// ```
+is_finite(value: Float) -> Bool {
+  value == value
+}
+
+/// Test whether the value fails self-equality.
+///
+/// ```pooka
+/// import pooka/float
+///
+/// assert !float.is_nan(1.0)
+/// ```
+is_nan(value: Float) -> Bool {
+  value != value
+}
