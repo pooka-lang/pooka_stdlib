@@ -1,0 +1,244 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// Integers can carry very large numbers without borrowing a decimal coat.
+////
+//// Work with arbitrary-precision integers and explicit conversions. Fallible
+//// arithmetic returns MathError instead of silently inventing a result. Division
+//// truncates toward zero; parsing and formatting bases support values from two
+//// through thirty-six.
+////
+//// ```pooka
+//// import pooka/int
+////
+//// assert int.divide(-5, 2) == Ok(-2)
+//// ```
+
+module int
+
+/// A int failure carrying the details needed by its caller. Keep this value in
+/// Result until a boundary can explain it.
+class ParseError(text: String)
+
+enum MathError {
+  NegativeExponent,
+  FloatOutOfRange,
+  DivisionByZero,
+  InvalidBase
+}
+
+external _Integers from erlang "pooka_stdlib_ffi" {
+  int_parse(text: String) -> Result(Int, String)
+
+  int_string(value: Int) -> String
+
+  int_to_float(value: Int) -> Result(Float, String)
+
+  quotient(a: Int, b: Int) -> Int
+
+  int_to_base(value: Int, base: Int) -> String
+
+  int_parse_base(text: String, base: Int) -> Result(Int, Nil)
+}
+
+/// Parse a integer value, retaining failure as ParseError.
+///
+/// ```pooka
+/// import pooka/int
+///
+/// assert int.parse("3") == Ok(3)
+/// ```
+parse(text: String) -> Result(Int, ParseError) {
+  match _Integers.int_parse(text) {
+    Ok(n) -> Ok(n)
+    Error(_) -> Error(ParseError(text))
+  }
+}
+
+/// Render a integer value using the library's textual representation.
+///
+/// ```pooka
+/// import pooka/int
+///
+/// let text = int.to_string(3)
+/// ```
+to_string(value: Int) -> String {
+  _Integers.int_string(value)
+}
+
+/// Return the nonnegative magnitude.
+///
+/// ```pooka
+/// import pooka/int
+///
+/// assert int.abs(-3) == 3
+/// ```
+abs(value: Int) -> Int {
+  match value < 0 {
+    True -> -value
+    False -> value
+  }
+}
+
+/// Return the smaller value.
+///
+/// ```pooka
+/// import pooka/int
+///
+/// assert int.min(2, 3) == 2
+/// ```
+min(a: Int, b: Int) -> Int {
+  match a < b {
+    True -> a
+    False -> b
+  }
+}
+
+/// Return the larger value.
+///
+/// ```pooka
+/// import pooka/int
+///
+/// assert int.max(2, 3) == 3
+/// ```
+max(a: Int, b: Int) -> Int {
+  match a > b {
+    True -> a
+    False -> b
+  }
+}
+
+/// Keep a value between the bounds; reversed bounds are normalized first.
+///
+/// ```pooka
+/// import pooka/int
+///
+/// assert int.clamp(3, -2, 2) == 2
+/// ```
+clamp(value: Int, lower: Int, upper: Int) -> Int {
+  min(max(value, min(lower, upper)), max(lower, upper))
+}
+
+/// Raise an integer to a nonnegative exponent using repeated squaring. Negative
+/// exponents return MathError.
+///
+/// ```pooka
+/// import pooka/int
+///
+/// assert int.pow(2, 10) == Ok(1024)
+/// ```
+pow(base: Int, exponent: Int) -> Result(Int, MathError) {
+  match exponent < 0 {
+    True -> Error(MathError.NegativeExponent)
+    False -> Ok(_pow(base, exponent, 1))
+  }
+}
+
+/// Repeated squaring keeps base^exponent times acc equal to the remaining
+/// result. Each recursive step halves the exponent.
+_pow(base: Int, exponent: Int, acc: Int) -> Int {
+  match exponent {
+    0 -> acc
+    _ -> _pow(base * base, _Integers.quotient(exponent, 2), match exponent % 2 {
+      0 -> acc
+      _ -> acc * base
+    })
+  }
+}
+
+/// Convert explicitly, returning FloatOutOfRange when the integer cannot become
+/// a BEAM float.
+///
+/// ```pooka
+/// import pooka/int
+///
+/// assert int.to_float(2) == Ok(2.0)
+/// ```
+to_float(value: Int) -> Result(Float, MathError) {
+  match _Integers.int_to_float(value) {
+    Ok(n) -> Ok(n)
+    Error(_) -> Error(MathError.FloatOutOfRange)
+  }
+}
+
+/// Test divisibility by two, including negative integers.
+///
+/// ```pooka
+/// import pooka/int
+///
+/// assert int.is_even(-4)
+/// ```
+is_even(value: Int) -> Bool {
+  value % 2 == 0
+}
+
+/// Test whether the integer is not even.
+///
+/// ```pooka
+/// import pooka/int
+///
+/// assert int.is_odd(-3)
+/// ```
+is_odd(value: Int) -> Bool {
+  !is_even(value)
+}
+
+/// Divide with truncation toward zero. A zero divisor returns DivisionByZero.
+///
+/// ```pooka
+/// import pooka/int
+///
+/// assert int.divide(-5, 2) == Ok(-2)
+/// ```
+divide(dividend: Int, divisor: Int) -> Result(Int, MathError) {
+  match divisor {
+    0 -> Error(MathError.DivisionByZero)
+    _ -> Ok(_Integers.quotient(dividend, divisor))
+  }
+}
+
+/// Return the integer remainder, retaining the dividend's sign. A zero divisor
+/// returns DivisionByZero.
+///
+/// ```pooka
+/// import pooka/int
+///
+/// assert int.remainder(-5, 2) == Ok(-1)
+/// ```
+remainder(dividend: Int, divisor: Int) -> Result(Int, MathError) {
+  match divisor {
+    0 -> Error(MathError.DivisionByZero)
+    _ -> Ok(dividend % divisor)
+  }
+}
+
+/// Render a lowercase integer in bases two through thirty-six.
+///
+/// ```pooka
+/// import pooka/int
+///
+/// assert int.to_base(255, 16) == Ok("ff")
+/// ```
+to_base(value: Int, base: Int) -> Result(String, MathError) {
+  match base >= 2 && base <= 36 {
+    True -> Ok(_Integers.int_to_base(value, base))
+    False -> Error(MathError.InvalidBase)
+  }
+}
+
+/// Parse an integer in bases two through thirty-six. Invalid bases or text
+/// return ParseError.
+///
+/// ```pooka
+/// import pooka/int
+///
+/// assert int.parse_base("ff", 16) == Ok(255)
+/// ```
+parse_base(text: String, base: Int) -> Result(Int, ParseError) {
+  match base >= 2 && base <= 36 {
+    True -> match _Integers.int_parse_base(text, base) {
+      Ok(n) -> Ok(n)
+      Error(_) -> Error(ParseError(text))
+    }
+    False -> Error(ParseError(text))
+  }
+}
