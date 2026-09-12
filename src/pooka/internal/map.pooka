@@ -1,0 +1,93 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// The storage cabinet keeps its Erlang map behind typed handles.
+////
+//// Capture a native immutable map in lookup, enumeration, size and update
+//// closures. Each change creates a new Storage with the same key/value types.
+//// This internal bridge avoids pretending that an untyped foreign map is an
+//// ordinary Pooka record.
+////
+//// ```text
+//// map -> lookup / pairs / size / change capabilities
+//// ```
+
+module map
+
+external _Maps from erlang "pooka_stdlib_ffi" {
+  dict_new(
+    create: fn(
+      fn(k) -> Option(v),
+      fn() -> List(#(k, v)),
+      fn() -> Int,
+      fn(k, Option(v)) -> Storage(k, v)
+    ) -> Storage(k, v)
+  ) -> Storage(k, v)
+
+  dict_from_list(
+    pairs: List(#(k, v)),
+    create: fn(
+      fn(k) -> Option(v),
+      fn() -> List(#(k, v)),
+      fn() -> Int,
+      fn(k, Option(v)) -> Storage(k, v)
+    ) -> Storage(k, v)
+  ) -> Storage(k, v)
+}
+
+/// Internal typed access to a captured Erlang map. Public callers should use
+/// Dict or Set.
+class Storage(k, v) {
+  let _lookup: fn(k) -> Option(v)
+  let _entries: fn() -> List(#(k, v))
+  let _count: fn() -> Int
+  let _change: fn(k, Option(v)) -> Storage(k, v)
+
+  /// Create the value from its declared fields. Public factory functions keep
+  /// the storage details out of ordinary calling code.
+  new(
+    lookup: fn(k) -> Option(v),
+    entries: fn() -> List(#(k, v)),
+    count: fn() -> Int,
+    change: fn(k, Option(v)) -> Storage(k, v)
+  ) {
+    self._lookup = lookup
+    self._entries = entries
+    self._count = count
+    self._change = change
+  }
+
+  /// Use the captured lookup capability without exposing the map.
+  get(key: k) -> Option(v) {
+    _lookup(key)
+  }
+
+  /// Enumerate captured map entries; order is unspecified.
+  pairs() -> List(#(k, v)) {
+    _entries()
+  }
+
+  /// Read the captured map size.
+  size() -> Int {
+    _count()
+  }
+
+  /// Return new storage after insertion or deletion; None removes the key.
+  change(key: k, value: Option(v)) -> Storage(k, v) {
+    _change(key, value)
+  }
+}
+
+/// Create storage capabilities over an empty native map.
+empty() -> Storage(k, v) {
+  _Maps.dict_new(fn(lookup, entries, count, change) {
+    Storage(lookup, entries, count, change)
+  })
+}
+
+/// Capture a native map made from pairs; later duplicate keys replace earlier
+/// values.
+from_list(pairs: List(#(k, v))) -> Storage(k, v) {
+  _Maps.dict_from_list(pairs, fn(lookup, entries, count, change) {
+    Storage(lookup, entries, count, change)
+  })
+}
