@@ -1,0 +1,111 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// Sometimes the envelope is simply empty.
+////
+//// Transform Some values while leaving None alone. Fallback callbacks are lazy,
+//// and flat_map avoids nesting another Option around a result that is already
+//// optional.
+////
+//// ```pooka
+//// import pooka/option
+////
+//// assert option.map(Some(2), fn(x) { x + 1 }) == Some(3)
+//// ```
+
+module option
+
+/// Transform the carried value; an absent or failed branch passes through
+/// unchanged.
+///
+/// ```pooka
+/// import pooka/option
+///
+/// assert option.map(Some(2), fn(x) { x + 1 }) == Some(3)
+/// ```
+map(value: Option(a), transform: fn(a) -> b) -> Option(b) {
+  match value {
+    Some(x) -> Some(transform(x))
+    None -> None
+  }
+}
+
+/// Chain a callback that already returns the same fallible wrapper.
+///
+/// ```pooka
+/// import pooka/option
+///
+/// assert option.flat_map(Some(2), fn(x) { Some(x + 1) }) == Some(3)
+/// ```
+flat_map(value: Option(a), transform: fn(a) -> Option(b)) -> Option(b) {
+  match value {
+    Some(x) -> transform(x)
+    None -> None
+  }
+}
+
+/// Return the carried value, or the already evaluated fallback.
+///
+/// ```pooka
+/// import pooka/option
+///
+/// assert option.unwrap_or(None, 7) == 7
+/// ```
+unwrap_or(value: Option(a), default: a) -> a {
+  match value {
+    Some(x) -> x
+    None -> default
+  }
+}
+
+/// Call the fallback only for None. A Some value leaves it asleep.
+///
+/// ```pooka
+/// import pooka/option
+///
+/// assert option.unwrap_or_else(None, fn() { 7 }) == 7
+/// ```
+unwrap_or_else(value: Option(a), fallback: fn() -> a) -> a {
+  match value {
+    Some(x) -> x
+    None -> fallback()
+  }
+}
+
+/// Ask whether an optional value is present.
+///
+/// ```pooka
+/// import pooka/option
+///
+/// assert option.is_some(Some(1))
+/// ```
+is_some(value: Option(a)) -> Bool {
+  match value {
+    Some(_) -> True
+    None -> False
+  }
+}
+
+/// Ask whether an optional value is absent.
+///
+/// ```pooka
+/// import pooka/option
+///
+/// assert option.is_none(None)
+/// ```
+is_none(value: Option(a)) -> Bool {
+  !is_some(value)
+}
+
+/// Replace absence with the supplied error value.
+///
+/// ```pooka
+/// import pooka/option
+///
+/// assert option.to_result(Some(1), "missing") == Ok(1)
+/// ```
+to_result(value: Option(a), error: e) -> Result(a, e) {
+  match value {
+    Some(x) -> Ok(x)
+    None -> Error(error)
+  }
+}
