@@ -1,0 +1,57 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// A comparison needs three signposts, not an arbitrary magic number.
+////
+//// Represent Less, Equal and Greater, and define the Comparator interface used by
+//// object-based comparisons. from_int uses only the sign of its input.
+////
+//// ```pooka
+//// import pooka/order.{Order}
+////
+//// assert order.from_int(0) == Order.Equal
+//// ```
+
+module order
+
+/// The three possible comparison directions. Equal reverses to itself.
+enum Order {
+  Less,
+  Equal,
+  Greater
+}
+
+/// A comparison contract for values with an explicit ordering policy.
+interface Comparator(a) {
+  /// Compare left to right and return Less, Equal or Greater.
+  compare(left: a, right: a) -> Order
+}
+
+/// Turn Less into Greater and Greater into Less. Equal stays where it is.
+///
+/// ```pooka
+/// import pooka/order.{Order}
+///
+/// assert order.reverse(Order.Less) == Order.Greater
+/// ```
+reverse(value: Order) -> Order {
+  match value {
+    Order.Less -> Order.Greater
+    Order.Equal -> Order.Equal
+    Order.Greater -> Order.Less
+  }
+}
+
+/// Use only the sign: negative is Less, zero is Equal and positive is Greater.
+///
+/// ```pooka
+/// import pooka/order.{Order}
+///
+/// assert order.from_int(0) == Order.Equal
+/// ```
+from_int(value: Int) -> Order {
+  match value {
+    n if n < 0 -> Order.Less
+    0 -> Order.Equal
+    _ -> Order.Greater
+  }
+}
