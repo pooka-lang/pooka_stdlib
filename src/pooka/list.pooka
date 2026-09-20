@@ -1,0 +1,408 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// A list is a patient little queue; its old versions keep their places.
+////
+//// Build and transform immutable singly linked lists. Functions take the list
+//// first so a chain of transformations can travel through pipes. Indexes start at
+//// zero; ranges exclude their upper bound. Sorting is stable, and callbacks run
+//// in list order.
+////
+//// ```pooka
+//// import pooka/list
+////
+//// assert ([1, 2, 3] |> list.map(fn(x) { x * 2 })) == [2, 4, 6]
+//// ```
+
+module list
+
+import pooka/order.{Order}
+
+external _Primitives from erlang "pooka_stdlib_ffi" {
+  cons(values: List(a), value: a) -> List(a)
+
+  compare(left: a, right: a) -> Int
+
+  quotient(a: Int, b: Int) -> Int
+}
+
+/// Return an empty list, ready to welcome elements of one inferred type.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.empty() == []
+/// ```
+empty() -> List(a) {
+  []
+}
+
+/// Ask whether the list has no elements.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.is_empty([])
+/// ```
+is_empty(values: List(a)) -> Bool {
+  match values {
+    [] -> True
+    _ -> False
+  }
+}
+
+/// Count elements from left to right; this walks the list.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.length([1, 2, 3]) == 3
+/// ```
+length(values: List(a)) -> Int {
+  fold(values, 0, fn(n, _) { n + 1 })
+}
+
+/// Open the first envelope, or return None for an empty list.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.first([4, 5]) == Some(4)
+/// ```
+first(values: List(a)) -> Option(a) {
+  match values {
+    [] -> None
+    [x, .._rest] -> Some(x)
+  }
+}
+
+/// Walk to the final element, or return None when there is none.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.last([4, 5]) == Some(5)
+/// ```
+last(values: List(a)) -> Option(a) {
+  match values {
+    [] -> None
+    [x] -> Some(x)
+    [_, ..rest] -> last(rest)
+  }
+}
+
+/// Read a zero-based index. Negative and out-of-range indexes return None.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.at([4, 5], 1) == Some(5)
+/// ```
+at(values: List(a), index: Int) -> Option(a) {
+  match index < 0 {
+    True -> None
+    False -> match values {
+      [] -> None
+      [x, ..rest] -> match index {
+        0 -> Some(x)
+        _ -> at(rest, index - 1)
+      }
+    }
+  }
+}
+
+/// Put a value at the front without walking the existing list.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.prepend([2, 3], 1) == [1, 2, 3]
+/// ```
+prepend(values: List(a), value: a) -> List(a) {
+  _Primitives.cons(values, value)
+}
+
+/// Put a value at the end, rebuilding the path through the original list.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.append([1, 2], 3) == [1, 2, 3]
+/// ```
+append(values: List(a), value: a) -> List(a) {
+  concat(values, [value])
+}
+
+/// Join two lists while retaining their element order.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.concat([1, 2], [3]) == [1, 2, 3]
+/// ```
+concat(left: List(a), right: List(a)) -> List(a) {
+  left
+  |> reverse()
+  |> fold(right, fn(acc, x) { prepend(acc, x) })
+}
+
+/// Turn the list around using a tail-recursive fold.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.reverse([1, 2, 3]) == [3, 2, 1]
+/// ```
+reverse(values: List(a)) -> List(a) {
+  fold(values, [], fn(acc, x) { prepend(acc, x) })
+}
+
+/// Visit each element once and keep the callback results in their original
+/// order.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.map([1, 2], fn(x) { x * 2 }) == [2, 4]
+/// ```
+map(values: List(a), transform: fn(a) -> b) -> List(b) {
+  values
+  |> fold([], fn(acc, x) { prepend(acc, transform(x)) })
+  |> reverse()
+}
+
+/// Keep the elements whose predicate returns True, preserving their order.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.filter([1, 2, 3], fn(x) { x > 1 }) == [2, 3]
+/// ```
+filter(values: List(a), keep: fn(a) -> Bool) -> List(a) {
+  values
+  |> fold([], fn(acc, x) {
+    match keep(x) {
+      True -> prepend(acc, x)
+      False -> acc
+    }
+  })
+  |> reverse()
+}
+
+/// Let each callback either send a transformed value onward or quietly return
+/// None.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.filter_map([1, 2], fn(x) { Some(x + 1) }) == [2, 3]
+/// ```
+filter_map(values: List(a), transform: fn(a) -> Option(b)) -> List(b) {
+  values
+  |> fold([], fn(acc, x) {
+    match transform(x) {
+      Some(y) -> prepend(acc, y)
+      None -> acc
+    }
+  })
+  |> reverse()
+}
+
+/// Carry an accumulator through the list. The callback receives accumulator
+/// first, element second.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.fold([1, 2, 3], 0, fn(acc, x) { acc + x }) == 6
+/// ```
+fold(values: List(a), initial: b, step: fn(b, a) -> b) -> b {
+  match values {
+    [] -> initial
+    [x, ..rest] -> fold(rest, step(initial, x), step)
+  }
+}
+
+/// Stop at the first element accepted by the predicate.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.find([1, 2, 3], fn(x) { x > 1 }) == Some(2)
+/// ```
+find(values: List(a), predicate: fn(a) -> Bool) -> Option(a) {
+  match values {
+    [] -> None
+    [x, ..rest] -> match predicate(x) {
+      True -> Some(x)
+      False -> find(rest, predicate)
+    }
+  }
+}
+
+/// Return True as soon as one element satisfies the predicate.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.any([1, 2], fn(x) { x == 2 })
+/// ```
+any(values: List(a), predicate: fn(a) -> Bool) -> Bool {
+  match find(values, predicate) {
+    Some(_) -> True
+    None -> False
+  }
+}
+
+/// Require every element to satisfy the predicate. The empty list has no
+/// counterexample.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.all([], fn(x: Int) { x > 0 })
+/// ```
+all(values: List(a), predicate: fn(a) -> Bool) -> Bool {
+  !any(values, fn(x) { !predicate(x) })
+}
+
+/// Test membership with the language's equality operation.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.contains([1, 2], 2)
+/// ```
+contains(values: List(a), value: a) -> Bool {
+  any(values, fn(x) { x == value })
+}
+
+/// Keep at most count elements. A nonpositive count produces an empty list.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.take([1, 2, 3], 2) == [1, 2]
+/// ```
+take(values: List(a), count: Int) -> List(a) {
+  values
+  |> _take(count, [])
+  |> reverse()
+}
+
+/// Carry selected elements in reverse order; the public take reverses them once
+/// at the end.
+_take(values, count, acc) {
+  match count <= 0 {
+    True -> acc
+    False -> match values {
+      [] -> acc
+      [x, ..rest] -> _take(rest, count - 1, prepend(acc, x))
+    }
+  }
+}
+
+/// Discard at most count elements. A nonpositive count leaves the list alone.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.drop([1, 2, 3], 2) == [3]
+/// ```
+drop(values: List(a), count: Int) -> List(a) {
+  match count <= 0 {
+    True -> values
+    False -> match values {
+      [] -> []
+      [_, ..rest] -> drop(rest, count - 1)
+    }
+  }
+}
+
+/// Stable-sort using the Erlang term order exposed by the comparison primitive.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.sort([3, 1, 2]) == [1, 2, 3]
+/// ```
+sort(values: List(a)) -> List(a) {
+  sort_by(values, fn(a, b) { order.from_int(_Primitives.compare(a, b)) })
+}
+
+/// Stable-sort using a callback returning Order; equal elements retain their
+/// relative order.
+///
+/// ```pooka
+/// import pooka/list
+/// import pooka/order.{Order}
+///
+/// assert list.sort_by([3, 1, 2], fn(a, b) { order.from_int(a - b) }) == [1, 2, 3]
+/// ```
+sort_by(values: List(a), compare: fn(a, a) -> Order) -> List(a) {
+  match values {
+    [] -> []
+    [_] -> values
+    _ -> {
+      let middle = _Primitives.quotient(length(values), 2)
+      _merge(
+        sort_by(take(values, middle), compare),
+        sort_by(drop(values, middle), compare),
+        compare,
+        []
+      )
+    }
+  }
+}
+
+/// Merge sorted runs into a reversed accumulator. Equal keys take the left
+/// element, preserving sort stability.
+_merge(left, right, compare, acc) {
+  match #(left, right) {
+    #([], _) -> concat(reverse(acc), right)
+    #(_, []) -> concat(reverse(acc), left)
+    #([x, ..xs], [y, ..ys]) -> match compare(x, y) {
+      Order.Greater -> _merge(left, ys, compare, prepend(acc, y))
+      _ -> _merge(xs, right, compare, prepend(acc, x))
+    }
+  }
+}
+
+/// Keep the first occurrence of each value. Equality is checked against values
+/// already kept.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.unique([2, 1, 2, 1]) == [2, 1]
+/// ```
+unique(values: List(a)) -> List(a) {
+  values
+  |> fold([], fn(acc, x) {
+    match contains(acc, x) {
+      True -> acc
+      False -> prepend(acc, x)
+    }
+  })
+  |> reverse()
+}
+
+/// Count upward from start, stopping before end. Reversed or empty bounds
+/// produce an empty list.
+///
+/// ```pooka
+/// import pooka/list
+///
+/// assert list.range(2, 5) == [2, 3, 4]
+/// ```
+range(start: Int, end: Int) -> List(Int) {
+  _range(start, end, [])
+}
+
+/// Count toward the exclusive end with a reversed accumulator, then reverse
+/// once.
+_range(start, end, acc) {
+  match start >= end {
+    True -> reverse(acc)
+    False -> _range(start + 1, end, prepend(acc, start))
+  }
+}
