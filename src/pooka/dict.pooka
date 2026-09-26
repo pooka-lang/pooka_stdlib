@@ -1,0 +1,237 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// Keep the keys in a small cabinet whose earlier drawers remain intact.
+////
+//// Dict wraps native immutable Erlang maps behind typed storage capabilities.
+//// Updates return a new dictionary. Iteration order is unspecified, duplicate
+//// input keys keep their last value, and equals compares contents rather than
+//// closure identities.
+////
+//// ```pooka
+//// import pooka/dict
+////
+//// assert dict.from_list([#("oak", 3)]).get("oak") == Some(3)
+//// ```
+
+module dict
+
+import pooka/list
+import pooka/internal/map.{Storage}
+
+/// An immutable key/value cabinet backed by typed native-map capabilities.
+/// Prefer empty and from_list when constructing public dictionaries.
+class Dict(k, v) {
+  let _storage: Storage(k, v)
+
+  /// Create the value from its declared fields. Public factory functions keep
+  /// the storage details out of ordinary calling code.
+  new(storage: Storage(k, v)) {
+    self._storage = storage
+  }
+
+  /// Look up one key without treating absence as an exception.
+  ///
+  /// ```pooka
+  /// import pooka/dict
+  ///
+  /// assert dict.from_list([#("oak", 1)]).get("oak") == Some(1)
+  /// ```
+  get(key: k) -> Option(v) {
+    _storage.get(key)
+  }
+
+  /// Return a dictionary with the key associated to the new value.
+  ///
+  /// ```pooka
+  /// import pooka/dict
+  ///
+  /// assert dict.empty().insert("oak", 2).get("oak") == Some(2)
+  /// ```
+  insert(key: k, value: v) -> Dict(k, v) {
+    Dict(_storage.change(key, Some(value)))
+  }
+
+  /// Return a dictionary without the key. Removing an absent key is harmless.
+  ///
+  /// ```pooka
+  /// import pooka/dict
+  ///
+  /// assert dict.from_list([#("oak", 1)]).delete("oak").is_empty()
+  /// ```
+  delete(key: k) -> Dict(k, v) {
+    Dict(_storage.change(key, None))
+  }
+
+  /// Check membership without exposing the stored value.
+  ///
+  /// ```pooka
+  /// import pooka/dict
+  ///
+  /// assert dict.from_list([#("oak", 1)]).has_key("oak")
+  /// ```
+  has_key(key: k) -> Bool {
+    match _storage.get(key) {
+      Some(_) -> True
+      None -> False
+    }
+  }
+
+  /// Count distinct keys.
+  ///
+  /// ```pooka
+  /// import pooka/dict
+  ///
+  /// assert dict.from_list([#("oak", 1)]).size() == 1
+  /// ```
+  size() -> Int {
+    _storage.size()
+  }
+
+  /// Ask whether no keys are stored.
+  ///
+  /// ```pooka
+  /// import pooka/dict
+  ///
+  /// assert dict.empty().is_empty()
+  /// ```
+  is_empty() -> Bool {
+    _storage.size() == 0
+  }
+
+  /// Enumerate keys in unspecified order.
+  ///
+  /// ```pooka
+  /// import pooka/dict
+  /// import pooka/list
+  ///
+  /// assert list.contains(dict.from_list([#("oak", 1)]).keys(), "oak")
+  /// ```
+  keys() -> List(k) {
+    list.map(_storage.pairs(), fn(pair) {
+      let #(key, _) = pair
+      key
+    })
+  }
+
+  /// Enumerate stored values in unspecified order.
+  ///
+  /// ```pooka
+  /// import pooka/dict
+  /// import pooka/list
+  ///
+  /// assert list.contains(dict.from_list([#("oak", 1)]).values(), 1)
+  /// ```
+  values() -> List(v) {
+    list.map(_storage.pairs(), fn(pair) {
+      let #(_, value) = pair
+      value
+    })
+  }
+
+  /// Enumerate key/value pairs in unspecified order.
+  ///
+  /// ```pooka
+  /// import pooka/dict
+  /// import pooka/list
+  ///
+  /// assert list.contains(dict.from_list([#("oak", 1)]).to_list(), #("oak", 1))
+  /// ```
+  to_list() -> List(#(k, v)) {
+    _storage.pairs()
+  }
+
+  /// Transform each value while retaining keys. The value type may change.
+  ///
+  /// ```pooka
+  /// import pooka/dict
+  ///
+  /// assert dict.from_list([#("oak", 1)]).map_values(fn(x) { x == 1 }).get("oak") == Some(True)
+  /// ```
+  map_values(transform: fn(v) -> b) -> Dict(k, b) {
+    _storage.pairs()
+    |> list.map(fn(pair) {
+      let #(key, value) = pair
+      #(key, transform(value))
+    })
+    |> from_list()
+  }
+
+  /// Keep pairs whose key-and-value predicate returns True.
+  ///
+  /// ```pooka
+  /// import pooka/dict
+  ///
+  /// assert dict.from_list([#("oak", 1)]).filter(fn(_, value) { value > 1 }).is_empty()
+  /// ```
+  filter(keep: fn(k, v) -> Bool) -> Dict(k, v) {
+    _storage.pairs()
+    |> list.filter(fn(pair) {
+      let #(key, value) = pair
+      keep(key, value)
+    })
+    |> from_list()
+  }
+
+  /// Fold with accumulator, key and value. Entry order is unspecified.
+  ///
+  /// ```pooka
+  /// import pooka/dict
+  ///
+  /// assert dict.from_list([#("oak", 2)]).fold(0, fn(acc, _, value) { acc + value }) == 2
+  /// ```
+  fold(initial: b, step: fn(b, k, v) -> b) -> b {
+    list.fold(_storage.pairs(), initial, fn(acc, pair) {
+      let #(key, value) = pair
+      step(acc, key, value)
+    })
+  }
+
+  /// Compare keys and values, independent of storage closure identity.
+  ///
+  /// ```pooka
+  /// import pooka/dict
+  ///
+  /// assert dict.from_list([#("oak", 1)]).equals(dict.from_list([#("oak", 1)]))
+  /// ```
+  equals(right: Dict(k, v)) -> Bool {
+    _storage.size() == right.size() && list.all(_storage.pairs(), fn(pair) {
+      let #(key, value) = pair
+      right.get(key) == Some(value)
+    })
+  }
+
+  /// Merge dictionaries, taking the right-hand value for a shared key.
+  ///
+  /// ```pooka
+  /// import pooka/dict
+  ///
+  /// assert dict.from_list([#("oak", 1)]).merge(dict.from_list([#("oak", 2)])).get("oak") == Some(2)
+  /// ```
+  merge(right: Dict(k, v)) -> Dict(k, v) {
+    _storage.pairs()
+    |> list.concat(right.to_list())
+    |> from_list()
+  }
+}
+
+/// Open an empty typed dictionary.
+///
+/// ```pooka
+/// import pooka/dict
+///
+/// assert dict.empty().is_empty()
+/// ```
+empty() -> Dict(k, v) {
+  Dict(map.empty())
+}
+
+/// Build a dictionary from pairs. For repeated keys, the last pair wins.
+///
+/// ```pooka
+/// import pooka/dict
+///
+/// assert dict.from_list([#("oak", 1), #("oak", 2)]).get("oak") == Some(2)
+/// ```
+from_list(pairs: List(#(k, v))) -> Dict(k, v) {
+  Dict(map.from_list(pairs))
+}
