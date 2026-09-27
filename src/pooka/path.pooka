@@ -1,0 +1,160 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// A path is a set of directions, not proof that the house exists.
+////
+//// Transform paths with the host runtime conventions. Normalization is lexical
+//// and does not resolve symbolic links. absolute and relative may fail while
+//// consulting the working directory; extensions include their leading dot.
+////
+//// ```pooka
+//// import pooka/path
+////
+//// assert path.extension("notes.txt") == Some(".txt")
+//// ```
+
+module path
+
+/// A path failure carrying the details needed by its caller. Keep this value in
+/// Result until a boundary can explain it.
+class PathError(message: String)
+
+external _Paths from erlang "pooka_stdlib_ffi" {
+  path_join(parts: List(String)) -> String
+
+  path_basename(path: String) -> String
+
+  path_dirname(path: String) -> String
+
+  path_extension(path: String) -> Option(String)
+
+  path_stem(path: String) -> String
+
+  path_absolute_test(path: String) -> Bool
+
+  path_normalize(path: String) -> String
+
+  path_absolute(path: String) -> Result(String, String)
+
+  path_relative(path: String, base: String) -> Result(String, String)
+}
+
+/// Join path components using the host filename conventions. An empty list
+/// yields a dot.
+///
+/// ```pooka
+/// import pooka/path
+///
+/// assert path.join([]) == "."
+/// ```
+join(parts: List(String)) -> String {
+  _Paths.path_join(parts)
+}
+
+/// Return the final component of a path.
+///
+/// ```pooka
+/// import pooka/path
+///
+/// assert path.basename("notes/oak.txt") == "oak.txt"
+/// ```
+basename(path: String) -> String {
+  _Paths.path_basename(path)
+}
+
+/// Return the path's parent component.
+///
+/// ```pooka
+/// import pooka/path
+///
+/// assert path.dirname("notes/oak.txt") == "notes"
+/// ```
+dirname(path: String) -> String {
+  _Paths.path_dirname(path)
+}
+
+/// Return a leading-dot extension, or None when there is no suffix.
+///
+/// ```pooka
+/// import pooka/path
+///
+/// assert path.extension("notes.txt") == Some(".txt")
+/// ```
+extension(path: String) -> Option(String) {
+  _Paths.path_extension(path)
+}
+
+/// Return the basename without its final extension.
+///
+/// ```pooka
+/// import pooka/path
+///
+/// assert path.stem("notes.txt") == "notes"
+/// ```
+stem(path: String) -> String {
+  _Paths.path_stem(path)
+}
+
+/// Check the host runtime's absolute-path convention.
+///
+/// ```pooka
+/// import pooka/path
+///
+/// let absolute = path.is_absolute("notes.txt")
+/// ```
+is_absolute(path: String) -> Bool {
+  _Paths.path_absolute_test(path)
+}
+
+/// Ask whether the host runtime considers the path relative.
+///
+/// ```pooka
+/// import pooka/path
+///
+/// let relative = path.is_relative("notes.txt")
+/// ```
+is_relative(path: String) -> Bool {
+  !is_absolute(path)
+}
+
+/// Normalize lexical components without resolving symbolic links.
+///
+/// ```pooka
+/// import pooka/path
+///
+/// let normalized = path.normalize("notes/./oak.txt")
+/// ```
+normalize(path: String) -> String {
+  _Paths.path_normalize(path)
+}
+
+/// Translate the foreign error payload into this module's error type while
+/// leaving a successful value unchanged.
+_error(value: Result(a, String)) -> Result(a, PathError) {
+  match value {
+    Ok(x) -> Ok(x)
+    Error(e) -> Error(PathError(e))
+  }
+}
+
+/// Resolve a relative path against the working directory without a filesystem
+/// existence check.
+///
+/// ```pooka
+/// import pooka/path
+///
+/// let assert Ok(resolved) = path.absolute("notes.txt")
+/// ```
+absolute(path: String) -> Result(String, PathError) {
+  _error(_Paths.path_absolute(path))
+}
+
+/// Find a lexical path from base to path after resolving their absolute forms.
+///
+/// ```pooka
+/// import pooka/path
+///
+/// let assert Ok(relative) = path.relative("notes/oak.txt", "notes")
+/// ```
+relative(path: String, base: String) -> Result(String, PathError) {
+  _error(_Paths.path_relative(path, base))
+}
