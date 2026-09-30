@@ -1,0 +1,141 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// An external command is a visitor, with its own voice and exit status.
+////
+//// Run executables with an explicit argument list and capture stdout and stderr
+//// separately. A nonzero exit is an Output value, not a launch error. Child stdin
+//// starts at EOF; timeout results use None when the deadline wins. The current
+//// runner targets POSIX hosts.
+////
+//// ```pooka
+//// import pooka/process
+////
+//// let assert Ok(output) = process.run("printf", ["%s", "hello"])
+//// assert output.stdout == "hello"
+//// ```
+
+module process
+
+/// A process failure carrying the details needed by its caller. Keep this value
+/// in Result until a boundary can explain it.
+class ProcessError(message: String)
+
+/// A completed command report: exit status, captured stdout and captured
+/// stderr. Nonzero status is still a completed command.
+class Output(status: Int, stdout: String, stderr: String) {
+  /// Check whether the command's exit status was zero.
+  ///
+  /// ```pooka
+  /// import pooka/process
+  ///
+  /// assert process.Output(0, "", "").succeeded()
+  /// ```
+  succeeded() -> Bool {
+    status == 0
+  }
+}
+
+external _Processes from erlang "pooka_stdlib_ffi" {
+  process_run(
+    command: String,
+    args: List(String),
+    directory: Option(String)
+  ) -> Result(
+    #(Int, String, String),
+    String
+  )
+
+  process_run_timeout(
+    command: String,
+    args: List(String),
+    milliseconds: Int
+  ) -> Result(
+    Option(#(Int, String, String)),
+    String
+  )
+
+  process_pid() -> Int
+
+  process_exit(code: Int) -> Nil
+}
+
+/// End the running application VM with the given exit status. This call does
+/// not return normally.
+///
+/// ```pooka
+/// import pooka/process
+///
+/// process.exit(0)
+/// ```
+exit(code: Int) -> Nil {
+  _Processes.process_exit(code)
+}
+
+/// Turn the foreign status/stdout/stderr tuple into Output, preserving launch
+/// errors separately from exit codes.
+_result(
+  value: Result(#(Int, String, String), String)
+) -> Result(Output, ProcessError) {
+  match value {
+    Ok(#(code, out, err)) -> Ok(Output(code, out, err))
+    Error(e) -> Error(ProcessError(e))
+  }
+}
+
+/// Run an executable with literal arguments and collect both output streams. A
+/// nonzero status remains an Output.
+///
+/// ```pooka
+/// import pooka/process
+///
+/// let assert Ok(output) = process.run("printf", ["%s", "oak"])
+/// ```
+run(command: String, args: List(String)) -> Result(Output, ProcessError) {
+  _result(_Processes.process_run(command, args, None))
+}
+
+/// Run a command with an explicit working directory.
+///
+/// ```pooka
+/// import pooka/process
+///
+/// let result = process.run_in("pwd", [], ".")
+/// ```
+run_in(
+  command: String,
+  args: List(String),
+  directory: String
+) -> Result(Output, ProcessError) {
+  _result(_Processes.process_run(command, args, Some(directory)))
+}
+
+/// Return Some(Output) if the command finishes, None if the deadline wins, or
+/// ProcessError for launch failure.
+///
+/// ```pooka
+/// import pooka/process
+///
+/// let result = process.run_with_timeout("printf", ["oak"], 1000)
+/// ```
+run_with_timeout(
+  command: String,
+  args: List(String),
+  milliseconds: Int
+) -> Result(Option(Output), ProcessError) {
+  match _Processes.process_run_timeout(command, args, milliseconds) {
+    Ok(Some(#(code, out, err))) -> Ok(Some(Output(code, out, err)))
+    Ok(None) -> Ok(None)
+    Error(e) -> Error(ProcessError(e))
+  }
+}
+
+/// Read the process identifier supplied by the runtime bridge.
+///
+/// ```pooka
+/// import pooka/process
+///
+/// let identifier = process.pid()
+/// ```
+pid() -> Int {
+  _Processes.process_pid()
+}
