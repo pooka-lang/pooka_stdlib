@@ -1,0 +1,125 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// Carry the answer and the explanation in different envelopes.
+////
+//// Transform successful values or errors without throwing away the other branch.
+//// flat_map chains a fallible callback, while conversion to Option deliberately
+//// discards error details.
+////
+//// ```pooka
+//// import pooka/result
+////
+//// assert result.map(Ok(2), fn(x) { x + 1 }) == Ok(3)
+//// ```
+
+module result
+
+/// Transform the carried value; an absent or failed branch passes through
+/// unchanged.
+///
+/// ```pooka
+/// import pooka/result
+///
+/// assert result.map(Ok(2), fn(x) { x + 1 }) == Ok(3)
+/// ```
+map(value: Result(a, e), transform: fn(a) -> b) -> Result(b, e) {
+  match value {
+    Ok(x) -> Ok(transform(x))
+    Error(e) -> Error(e)
+  }
+}
+
+/// Transform only the error, preserving successful values.
+///
+/// ```pooka
+/// import pooka/result
+///
+/// assert result.map_error(Error(2), fn(x) { x + 1 }) == Error(3)
+/// ```
+map_error(value: Result(a, e), transform: fn(e) -> f) -> Result(a, f) {
+  match value {
+    Ok(x) -> Ok(x)
+    Error(e) -> Error(transform(e))
+  }
+}
+
+/// Chain a callback that already returns the same fallible wrapper.
+///
+/// ```pooka
+/// import pooka/result
+///
+/// assert result.flat_map(Ok(2), fn(x) { Ok(x + 1) }) == Ok(3)
+/// ```
+flat_map(value: Result(a, e), transform: fn(a) -> Result(b, e)) -> Result(b, e) {
+  match value {
+    Ok(x) -> transform(x)
+    Error(e) -> Error(e)
+  }
+}
+
+/// Return the carried value, or the already evaluated fallback.
+///
+/// ```pooka
+/// import pooka/result
+///
+/// assert result.unwrap_or(Error("missing"), 7) == 7
+/// ```
+unwrap_or(value: Result(a, e), default: a) -> a {
+  match value {
+    Ok(x) -> x
+    Error(_) -> default
+  }
+}
+
+/// Call the fallback with the error only when the Result failed.
+///
+/// ```pooka
+/// import pooka/result
+///
+/// assert result.unwrap_or_else(Error(2), fn(error) { error + 1 }) == 3
+/// ```
+unwrap_or_else(value: Result(a, e), fallback: fn(e) -> a) -> a {
+  match value {
+    Ok(x) -> x
+    Error(e) -> fallback(e)
+  }
+}
+
+/// Ask whether the Result carries success.
+///
+/// ```pooka
+/// import pooka/result
+///
+/// assert result.is_ok(Ok(1))
+/// ```
+is_ok(value: Result(a, e)) -> Bool {
+  match value {
+    Ok(_) -> True
+    Error(_) -> False
+  }
+}
+
+/// Ask whether the Result carries an error.
+///
+/// ```pooka
+/// import pooka/result
+///
+/// assert result.is_error(Error("missing"))
+/// ```
+is_error(value: Result(a, e)) -> Bool {
+  !is_ok(value)
+}
+
+/// Keep a successful value and deliberately discard error details.
+///
+/// ```pooka
+/// import pooka/result
+///
+/// assert result.to_option(Ok(1)) == Some(1)
+/// ```
+to_option(value: Result(a, e)) -> Option(a) {
+  match value {
+    Ok(x) -> Some(x)
+    Error(_) -> None
+  }
+}
