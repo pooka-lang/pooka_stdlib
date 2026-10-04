@@ -1,0 +1,178 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// A set keeps one chair for each distinct guest.
+////
+//// Store membership through an immutable dictionary with Nil values. Set
+//// operations return new sets, enumeration order is unspecified, and equals
+//// compares membership rather than the identity of captured storage closures.
+////
+//// ```pooka
+//// import pooka/set
+////
+//// assert set.from_list([1, 1, 2]).size() == 2
+//// ```
+
+module set
+
+import pooka/dict.{Dict}
+import pooka/list
+
+/// An immutable membership collection. Equality of contents is provided by
+/// equals; storage handles themselves have identity.
+class Set(a) {
+  let _values: Dict(a, Nil)
+
+  /// Create the value from its declared fields. Public factory functions keep
+  /// the storage details out of ordinary calling code.
+  new(values: Dict(a, Nil)) {
+    self._values = values
+  }
+
+  /// Enumerate members in unspecified order.
+  ///
+  /// ```pooka
+  /// import pooka/list
+  /// import pooka/set
+  ///
+  /// assert list.contains(set.from_list([1, 2]).to_list(), 1)
+  /// ```
+  to_list() -> List(a) {
+    _values.keys()
+  }
+
+  /// Return a set containing the value.
+  ///
+  /// ```pooka
+  /// import pooka/set
+  ///
+  /// assert set.empty().insert(1).contains(1)
+  /// ```
+  insert(value: a) -> Set(a) {
+    Set(_values.insert(value, Nil))
+  }
+
+  /// Return a set without the value; absence is harmless.
+  ///
+  /// ```pooka
+  /// import pooka/set
+  ///
+  /// assert set.from_list([1]).delete(1).is_empty()
+  /// ```
+  delete(value: a) -> Set(a) {
+    Set(_values.delete(value))
+  }
+
+  /// Check whether a value is a member.
+  ///
+  /// ```pooka
+  /// import pooka/set
+  ///
+  /// assert set.from_list([1, 2]).contains(2)
+  /// ```
+  contains(value: a) -> Bool {
+    _values.has_key(value)
+  }
+
+  /// Count distinct members.
+  ///
+  /// ```pooka
+  /// import pooka/set
+  ///
+  /// assert set.from_list([1, 1, 2]).size() == 2
+  /// ```
+  size() -> Int {
+    _values.size()
+  }
+
+  /// Ask whether the set has no members.
+  ///
+  /// ```pooka
+  /// import pooka/set
+  ///
+  /// assert set.empty().is_empty()
+  /// ```
+  is_empty() -> Bool {
+    _values.is_empty()
+  }
+
+  /// Keep members present in either set.
+  ///
+  /// ```pooka
+  /// import pooka/set
+  ///
+  /// assert set.from_list([1]).union(set.from_list([2])).size() == 2
+  /// ```
+  union(right: Set(a)) -> Set(a) {
+    Set(_values.merge(right._values))
+  }
+
+  /// Keep members present in both sets.
+  ///
+  /// ```pooka
+  /// import pooka/set
+  ///
+  /// assert set.from_list([1, 2]).intersection(set.from_list([2, 3])).equals(set.from_list([2]))
+  /// ```
+  intersection(right: Set(a)) -> Set(a) {
+    Set(_values.filter(fn(key, _) { right.contains(key) }))
+  }
+
+  /// Keep left-hand members absent from the right-hand set.
+  ///
+  /// ```pooka
+  /// import pooka/set
+  ///
+  /// assert set.from_list([1, 2]).difference(set.from_list([2])).equals(set.from_list([1]))
+  /// ```
+  difference(right: Set(a)) -> Set(a) {
+    Set(_values.filter(fn(key, _) { !right.contains(key) }))
+  }
+
+  /// Compare membership rather than the identity of captured dictionary
+  /// storage.
+  ///
+  /// ```pooka
+  /// import pooka/set
+  ///
+  /// assert set.from_list([1, 2]).equals(set.from_list([2, 1]))
+  /// ```
+  equals(right: Set(a)) -> Bool {
+    size() == right.size() && is_subset(right)
+  }
+
+  /// Require every member of this set to belong to the right-hand set.
+  ///
+  /// ```pooka
+  /// import pooka/set
+  ///
+  /// assert set.from_list([1]).is_subset(set.from_list([1, 2]))
+  /// ```
+  is_subset(right: Set(a)) -> Bool {
+    list.all(to_list(), fn(value) { right.contains(value) })
+  }
+}
+
+/// Open an empty set.
+///
+/// ```pooka
+/// import pooka/set
+///
+/// assert set.empty().is_empty()
+/// ```
+empty() -> Set(a) {
+  Set(dict.empty())
+}
+
+/// Build membership from a list, forgetting repeated values.
+///
+/// ```pooka
+/// import pooka/set
+///
+/// assert set.from_list([1, 1, 2]).size() == 2
+/// ```
+from_list(values: List(a)) -> Set(a) {
+  values
+  |> list.map(fn(x) { #(x, Nil) })
+  |> dict.from_list()
+  |> Set()
+}
