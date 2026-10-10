@@ -1,0 +1,242 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// Text has letters, bytes and occasionally a combining mark travelling alone.
+////
+//// Represent UTF-8 strings and expose code-point operations. Length, slicing and
+//// to_list count Unicode code points, not bytes or grapheme clusters. Slice
+//// offsets are clamped through list operations; use byte-oriented APIs when
+//// encoding layout matters.
+////
+//// ```pooka
+//// import pooka/string
+////
+//// assert string.slice("🐇oak", 1, 2) == "oa"
+//// ```
+
+module string
+
+import pooka/list
+
+external _Text from erlang "pooka_stdlib_ffi" {
+  string_points(text: String) -> List(Int)
+
+  string_from_points(points: List(Int)) -> String
+
+  string_concat(left: String, right: String) -> String
+
+  string_join(parts: List(String), separator: String) -> String
+
+  string_split(text: String, separator: String) -> List(String)
+
+  string_contains(text: String, needle: String) -> Bool
+
+  string_starts(text: String, prefix: String) -> Bool
+
+  string_ends(text: String, suffix: String) -> Bool
+
+  string_replace(text: String, old: String, replacement: String) -> String
+
+  string_trim(text: String, direction: Int) -> String
+
+  string_upper(text: String) -> String
+
+  string_lower(text: String) -> String
+}
+
+/// Count Unicode code points, including combining marks as their own points.
+///
+/// ```pooka
+/// import pooka/string
+///
+/// assert string.length("🐇oak") == 4
+/// ```
+length(text: String) -> Int {
+  text
+  |> to_list()
+  |> list.length()
+}
+
+/// Ask whether the string contains no bytes and no code points.
+///
+/// ```pooka
+/// import pooka/string
+///
+/// assert string.is_empty("")
+/// ```
+is_empty(text: String) -> Bool {
+  text == ""
+}
+
+/// Append the second UTF-8 string to the first.
+///
+/// ```pooka
+/// import pooka/string
+///
+/// assert string.concat("oak", "leaf") == "oakleaf"
+/// ```
+concat(left: String, right: String) -> String {
+  _Text.string_concat(left, right)
+}
+
+/// Place the separator between strings, without adding one at either end.
+///
+/// ```pooka
+/// import pooka/string
+///
+/// assert string.join(["oak", "pine"], ", ") == "oak, pine"
+/// ```
+join(parts: List(String), separator: String) -> String {
+  _Text.string_join(parts, separator)
+}
+
+/// Split on a separator; an empty separator yields individual Unicode code
+/// points.
+///
+/// ```pooka
+/// import pooka/string
+///
+/// assert string.split("oak:pine", ":") == ["oak", "pine"]
+/// ```
+split(text: String, separator: String) -> List(String) {
+  _Text.string_split(text, separator)
+}
+
+/// Test for a substring. Every string contains the empty string.
+///
+/// ```pooka
+/// import pooka/string
+///
+/// assert string.contains("oakleaf", "leaf")
+/// ```
+contains(text: String, needle: String) -> Bool {
+  _Text.string_contains(text, needle)
+}
+
+/// Check the beginning of the string without changing it.
+///
+/// ```pooka
+/// import pooka/string
+///
+/// assert string.starts_with("oakleaf", "oak")
+/// ```
+starts_with(text: String, prefix: String) -> Bool {
+  _Text.string_starts(text, prefix)
+}
+
+/// Check the end of the string without changing it.
+///
+/// ```pooka
+/// import pooka/string
+///
+/// assert string.ends_with("oakleaf", "leaf")
+/// ```
+ends_with(text: String, suffix: String) -> Bool {
+  _Text.string_ends(text, suffix)
+}
+
+/// Replace all nonoverlapping occurrences. An empty search string leaves the
+/// text unchanged.
+///
+/// ```pooka
+/// import pooka/string
+///
+/// assert string.replace("oak oak", "oak", "pine") == "pine pine"
+/// ```
+replace(text: String, old: String, replacement: String) -> String {
+  _Text.string_replace(text, old, replacement)
+}
+
+/// Remove supported Unicode whitespace from both ends.
+///
+/// ```pooka
+/// import pooka/string
+///
+/// assert string.trim("  oak  ") == "oak"
+/// ```
+trim(text: String) -> String {
+  _Text.string_trim(text, 0)
+}
+
+/// Remove supported Unicode whitespace from the beginning only.
+///
+/// ```pooka
+/// import pooka/string
+///
+/// assert string.trim_start("  oak ") == "oak "
+/// ```
+trim_start(text: String) -> String {
+  _Text.string_trim(text, 1)
+}
+
+/// Remove supported Unicode whitespace from the end only.
+///
+/// ```pooka
+/// import pooka/string
+///
+/// assert string.trim_end(" oak  ") == " oak"
+/// ```
+trim_end(text: String) -> String {
+  _Text.string_trim(text, 2)
+}
+
+/// Apply the runtime's Unicode uppercase conversion.
+///
+/// ```pooka
+/// import pooka/string
+///
+/// assert string.uppercase("oak") == "OAK"
+/// ```
+uppercase(text: String) -> String {
+  _Text.string_upper(text)
+}
+
+/// Apply the runtime's Unicode lowercase conversion.
+///
+/// ```pooka
+/// import pooka/string
+///
+/// assert string.lowercase("OAK") == "oak"
+/// ```
+lowercase(text: String) -> String {
+  _Text.string_lower(text)
+}
+
+/// Take count code points after dropping start code points. Nonpositive bounds
+/// follow list drop/take semantics.
+///
+/// ```pooka
+/// import pooka/string
+///
+/// assert string.slice("🐇oak", 1, 2) == "oa"
+/// ```
+slice(text: String, start: Int, count: Int) -> String {
+  text
+  |> to_list()
+  |> list.drop(start)
+  |> list.take(count)
+  |> _Text.string_from_points()
+}
+
+/// Join count copies of the text. A nonpositive count produces an empty string.
+///
+/// ```pooka
+/// import pooka/string
+///
+/// assert string.repeat("ha", 3) == "hahaha"
+/// ```
+repeat(text: String, count: Int) -> String {
+  list.range(0, count)
+  |> list.map(fn(_) { text })
+  |> join("")
+}
+
+/// Expose the Unicode scalar values as integer code points.
+///
+/// ```pooka
+/// import pooka/string
+///
+/// assert string.to_list("A") == [65]
+/// ```
+to_list(text: String) -> List(Int) {
+  _Text.string_points(text)
+}
