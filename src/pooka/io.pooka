@@ -1,0 +1,175 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// Let the terminal speak, and listen carefully when it falls silent.
+////
+//// Use Erlang standard_io for ordinary output and standard_error for error
+//// output. Readers distinguish EOF from an empty line and retain line endings.
+//// read_char reads a Unicode code point; read_all preserves every received line.
+////
+//// ```pooka
+//// import pooka/io
+////
+//// let assert Ok(_) = io.println("Good evening")
+//// ```
+
+module io
+
+import pooka/list
+import pooka/string
+
+/// A io failure carrying the details needed by its caller. Keep this value in
+/// Result until a boundary can explain it.
+class IoError(message: String)
+
+external _Stdio from erlang "pooka_stdlib_ffi" {
+  io_print(text: String, error: Bool) -> Result(Nil, String)
+
+  io_read_line() -> Result(Option(String), String)
+
+  io_read_char() -> Result(Option(String), String)
+
+  io_flush() -> Result(Nil, String)
+
+  io_is_terminal(error: Bool) -> Bool
+}
+
+/// Translate the foreign error payload into this module's error type while
+/// leaving a successful value unchanged.
+_error(value: Result(a, String)) -> Result(a, IoError) {
+  match value {
+    Ok(x) -> Ok(x)
+    Error(e) -> Error(IoError(e))
+  }
+}
+
+/// Write text to stdout without adding a newline.
+///
+/// ```pooka
+/// import pooka/io
+///
+/// let assert Ok(_) = io.print("oak")
+/// ```
+print(text: String) -> Result(Nil, IoError) {
+  _error(_Stdio.io_print(text, False))
+}
+
+/// Write text to stdout followed by a newline.
+///
+/// ```pooka
+/// import pooka/io
+///
+/// let assert Ok(_) = io.println("oak")
+/// ```
+println(text: String) -> Result(Nil, IoError) {
+  print(text + "\n")
+}
+
+/// Write text to standard_error without adding a newline.
+///
+/// ```pooka
+/// import pooka/io
+///
+/// let assert Ok(_) = io.eprint("missing file")
+/// ```
+eprint(text: String) -> Result(Nil, IoError) {
+  _error(_Stdio.io_print(text, True))
+}
+
+/// Write text to standard_error followed by a newline.
+///
+/// ```pooka
+/// import pooka/io
+///
+/// let assert Ok(_) = io.eprintln("missing file")
+/// ```
+eprintln(text: String) -> Result(Nil, IoError) {
+  eprint(text + "\n")
+}
+
+/// Read one line with its terminator. EOF is Ok(None), not an empty line.
+///
+/// ```pooka
+/// import pooka/io
+///
+/// let assert Ok(line) = io.read_line()
+/// ```
+read_line() -> Result(Option(String), IoError) {
+  _error(_Stdio.io_read_line())
+}
+
+/// Write the prompt before requesting a line. Preserve EOF and input errors.
+///
+/// ```pooka
+/// import pooka/io
+///
+/// let assert Ok(answer) = io.prompt("Name: ")
+/// ```
+prompt(text: String) -> Result(Option(String), IoError) {
+  print(text)?
+  read_line()
+}
+
+/// Read one Unicode code point, returning None at EOF.
+///
+/// ```pooka
+/// import pooka/io
+///
+/// let assert Ok(character) = io.read_char()
+/// ```
+read_char() -> Result(Option(String), IoError) {
+  _error(_Stdio.io_read_char())
+}
+
+/// Read until EOF, preserving line endings. Immediate EOF returns an empty
+/// string.
+///
+/// ```pooka
+/// import pooka/io
+///
+/// let assert Ok(text) = io.read_all()
+/// ```
+read_all() -> Result(String, IoError) {
+  _read_all([])
+}
+
+/// Collect lines in reverse, then join once at EOF. This avoids rebuilding the
+/// entire received text after every read.
+_read_all(acc: List(String)) -> Result(String, IoError) {
+  match read_line()? {
+    None -> Ok(acc |> list.reverse() |> string.join(""))
+    Some(text) -> _read_all(list.prepend(acc, text))
+  }
+}
+
+/// Issue an ordered empty write to the output device.
+///
+/// ```pooka
+/// import pooka/io
+///
+/// let assert Ok(_) = io.flush()
+/// ```
+flush() -> Result(Nil, IoError) {
+  _error(_Stdio.io_flush())
+}
+
+/// Ask whether stdout is attached to a terminal.
+///
+/// ```pooka
+/// import pooka/io
+///
+/// let terminal = io.is_terminal()
+/// ```
+is_terminal() -> Bool {
+  _Stdio.io_is_terminal(False)
+}
+
+/// Ask whether standard_error is attached to a terminal.
+///
+/// ```pooka
+/// import pooka/io
+///
+/// let terminal = io.is_error_terminal()
+/// ```
+is_error_terminal() -> Bool {
+  _Stdio.io_is_terminal(True)
+}
