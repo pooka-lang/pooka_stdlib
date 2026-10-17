@@ -1,0 +1,182 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// Keep the calendar clock and the elapsed-time clock on different shelves.
+////
+//// Timestamp measures wall-clock milliseconds; Instant is for monotonic elapsed
+//// time. Duration stores integer milliseconds. Negative sleep durations are
+//// rejected, and timestamp arithmetic returns new values.
+////
+//// ```pooka
+//// import pooka/time
+////
+//// assert time.seconds(2).as_milliseconds() == 2000
+//// ```
+
+module time
+
+enum TimeError {
+  NegativeDuration,
+  DurationTooLarge
+}
+
+external _Clock from erlang "pooka_stdlib_ffi" {
+  wall_time() -> Int
+
+  monotonic_time() -> Int
+
+  sleep(milliseconds: Int) -> Result(Nil, String)
+
+  int_float(value: Int) -> Float
+}
+
+/// An integer millisecond interval; elapsed and wall-clock APIs share this unit
+/// without sharing their clocks.
+class Duration(milliseconds: Int) {
+  /// Convert stored milliseconds to floating-point seconds.
+  ///
+  /// ```pooka
+  /// import pooka/time
+  ///
+  /// assert time.milliseconds(1500).as_seconds() == 1.5
+  /// ```
+  as_seconds() -> Float {
+    _Clock.int_float(milliseconds) / 1000.0
+  }
+
+  /// Read the exact stored integer milliseconds.
+  ///
+  /// ```pooka
+  /// import pooka/time
+  ///
+  /// assert time.seconds(2).as_milliseconds() == 2000
+  /// ```
+  as_milliseconds() -> Int {
+    milliseconds
+  }
+}
+
+/// A wall-clock point measured in milliseconds. Arithmetic returns another
+/// timestamp.
+class Timestamp(milliseconds: Int) {
+  /// Return a timestamp moved forward by the duration.
+  ///
+  /// ```pooka
+  /// import pooka/time
+  ///
+  /// assert time.Timestamp(1000).add(time.milliseconds(25)).milliseconds == 1025
+  /// ```
+  add(duration: Duration) -> Timestamp {
+    Timestamp(milliseconds + duration.milliseconds)
+  }
+
+  /// Return a timestamp moved backward by the duration.
+  ///
+  /// ```pooka
+  /// import pooka/time
+  ///
+  /// assert time.Timestamp(1000).subtract(time.milliseconds(25)).milliseconds == 975
+  /// ```
+  subtract(duration: Duration) -> Timestamp {
+    Timestamp(milliseconds - duration.milliseconds)
+  }
+}
+
+/// A monotonic clock reading for elapsed measurements. Construct readings with
+/// monotonic_now.
+class Instant {
+  let _ticks: Int
+
+  /// Initialize the value from the supplied state. Later updates return new
+  /// values.
+  new(ticks: Int) {
+    self._ticks = ticks
+  }
+
+  /// Measure from this instant to end. Keep the start and end in their original
+  /// order.
+  ///
+  /// ```pooka
+  /// import pooka/time
+  ///
+  /// let start = time.monotonic_now()
+  /// let elapsed = start.duration_until(time.monotonic_now())
+  /// ```
+  duration_until(end: Instant) -> Duration {
+    Duration(end._ticks - _ticks)
+  }
+}
+
+/// Read the wall clock as a millisecond timestamp. Use Instant for elapsed
+/// measurements.
+///
+/// ```pooka
+/// import pooka/time
+///
+/// let timestamp = time.now()
+/// ```
+now() -> Timestamp {
+  Timestamp(_Clock.wall_time())
+}
+
+/// Read a monotonic instant for measuring elapsed time.
+///
+/// ```pooka
+/// import pooka/time
+///
+/// let started = time.monotonic_now()
+/// ```
+monotonic_now() -> Instant {
+  Instant(_Clock.monotonic_time())
+}
+
+/// Subtract two monotonic instants in start-to-end order.
+///
+/// ```pooka
+/// import pooka/time
+///
+/// let started = time.monotonic_now()
+/// let elapsed = time.duration_between(started, time.monotonic_now())
+/// ```
+duration_between(start: Instant, end: Instant) -> Duration {
+  start.duration_until(end)
+}
+
+/// Construct a duration by converting whole seconds to milliseconds.
+///
+/// ```pooka
+/// import pooka/time
+///
+/// assert time.seconds(2).as_milliseconds() == 2000
+/// ```
+seconds(value: Int) -> Duration {
+  Duration(value * 1000)
+}
+
+/// Construct a duration from integer milliseconds.
+///
+/// ```pooka
+/// import pooka/time
+///
+/// assert time.milliseconds(25).as_milliseconds() == 25
+/// ```
+milliseconds(value: Int) -> Duration {
+  Duration(value)
+}
+
+/// Sleep for a nonnegative duration, returning typed errors for unsupported
+/// durations.
+///
+/// ```pooka
+/// import pooka/time
+///
+/// assert time.sleep(time.milliseconds(0)) == Ok(Nil)
+/// ```
+sleep(duration: Duration) -> Result(Nil, TimeError) {
+  match duration.milliseconds < 0 {
+    True -> Error(TimeError.NegativeDuration)
+    False -> match _Clock.sleep(duration.milliseconds) {
+      Ok(_) -> Ok(Nil)
+      Error(_) -> Error(TimeError.DurationTooLarge)
+    }
+  }
+}
