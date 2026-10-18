@@ -1,0 +1,103 @@
+//// Leave the borrowed room as we found it.
+////
+//// Filesystem tests use process-labelled temporary paths and remove the files
+//// and directories they create. Bytes, UTF-8 text, missing entries and directory
+//// lifecycles cross the Erlang boundary here, with failures kept inside FileError.
+////
+//// ```pooka
+//// assert file.exists("/a/missing/path") == Ok(False)
+//// ```
+
+module file_test
+
+import pooka/file
+import pooka/path
+import pooka/process
+import pooka/int
+import pooka/list
+
+/// Give each test a labelled path containing the current process ID.
+/// This separates concurrent processes; fixed labels still assume a passing run
+/// cleans up before the same process repeats a test.
+_root(label: String) -> String {
+  "/tmp/pooka-stdlib-" + int.to_string(process.pid()) + "-" + label
+}
+
+// The same Unicode content travels through text and byte APIs. Appending
+// adds to the existing file, and cleanup gives the temporary directory back.
+test "UTF8 text and byte round trips" {
+  let root = _root("roundtrip")
+  assert file.create_directory(root) == Ok(Nil)
+  let name = path.join([root, "α🐇.txt"])
+  assert file.write(name, "α🐇") == Ok(Nil)
+  assert file.append(name, "\nβ") == Ok(Nil)
+  assert file.read(name) == Ok("α🐇\nβ")
+  assert file.read_bytes(name) == Ok(<<"α🐇\nβ":utf8>>)
+  assert file.is_file(name) == Ok(True)
+  assert file.is_directory(name) == Ok(False)
+  assert file.exists(name) == Ok(True)
+  assert file.delete(name) == Ok(Nil)
+  assert file.remove_directory(root) == Ok(Nil)
+}
+
+// Bytes may contain values that are not UTF-8 text. Reading them as text
+// returns FileError; writing a partial byte must fail through the same boundary.
+test "binary data and malformed UTF8 are distinct" {
+  let name = _root("bytes")
+  assert file.write_bytes(name, <<0, 255, 1>>) == Ok(Nil)
+  assert file.read_bytes(name) == Ok(<<0, 255, 1>>)
+  let assert Error(file.FileError(_, _)) = file.read(name)
+  let assert Error(file.FileError(_, _)) = file.write_bytes(name, <<1:1>>)
+  assert file.delete(name) == Ok(Nil)
+}
+
+// Create a nested directory twice, then copy and move a file inside it.
+// The nonempty directory must refuse removal until its remaining files are gone.
+test "copy rename list and directory lifecycle" {
+  let root = _root("directories")
+  let nested = path.join([root, "a", "b"])
+  assert file.create_directories(nested) == Ok(Nil)
+  assert file.create_directories(nested) == Ok(Nil)
+  assert file.is_directory(nested) == Ok(True)
+  let source = path.join([nested, "source"])
+  let copied = path.join([nested, "copy"])
+  let moved = path.join([nested, "moved"])
+  assert file.write(source, "data") == Ok(Nil)
+  assert file.copy(source, copied) == Ok(Nil)
+  assert file.rename(copied, moved) == Ok(Nil)
+  assert file.read(moved) == Ok("data")
+  let assert Ok(names) = file.list_directory(nested)
+  assert list.sort(names) == ["moved", "source"]
+  let assert Error(file.FileError(_, _)) = file.remove_directory(nested)
+  assert file.delete(source) == Ok(Nil)
+  assert file.delete(moved) == Ok(Nil)
+  assert file.remove_directory(nested) == Ok(Nil)
+  assert file.remove_directory(path.join([root, "a"])) == Ok(Nil)
+  assert file.remove_directory(root) == Ok(Nil)
+}
+
+// Asking whether a missing entry exists gives False. Trying to operate on
+// that entry gives FileError, carrying the requested path on the read failure.
+test "missing files return typed errors and predicates return false" {
+  let missing = _root("missing")
+  assert file.exists(missing) == Ok(False)
+  assert file.is_file(missing) == Ok(False)
+  assert file.is_directory(missing) == Ok(False)
+  let assert Error(file.FileError(path, _)) = file.read(missing)
+  assert path == missing
+  let assert Error(file.FileError(_, _)) = file.read_bytes(missing)
+  let assert Error(file.FileError(_, _)) = file.delete(missing)
+  let assert Error(file.FileError(_, _)) = file.copy(missing, missing + "2")
+  let assert Error(file.FileError(_, _)) = file.rename(missing, missing + "2")
+  let assert Error(file.FileError(_, _)) = file.list_directory(missing)
+}
+
+// A regular file is already occupying the requested name. Directory creation
+// must report that conflict rather than claiming the room is ready.
+test "recursive directory creation rejects regular files" {
+  let name = _root("regular")
+  assert file.write(name, "x") == Ok(Nil)
+  let assert Error(file.FileError(_, _)) = file.create_directories(name)
+  let assert Error(file.FileError(_, _)) = file.create_directory(name)
+  assert file.delete(name) == Ok(Nil)
+}
