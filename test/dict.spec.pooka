@@ -1,0 +1,145 @@
+//// A small cabinet whose old drawers stay put.
+////
+//// Dictionary methods return a new cabinet; earlier values keep their contents.
+//// We check replacement, missing keys, structural keys and explicit equality.
+//// Enumeration is sorted only for assertions that must ignore map traversal order.
+////
+//// ```pooka
+//// assert dict.from_list([#("key", None)]).get("key") == Some(None)
+//// ```
+
+module dict_test
+
+import pooka/dict
+import pooka/list
+import pooka/int
+
+// An empty cabinet still knows its key and value types. Missing lookups return
+// None, and every view of its contents must agree that no entries are present.
+test "empty dictionaries and missing keys" {
+  let values: dict.Dict(String, Int) = dict.empty()
+  assert values.is_empty()
+  assert values.size() == 0
+  assert values.get("missing") == None
+  assert !values.has_key("missing")
+  assert values.keys() == []
+  assert values.values() == []
+}
+
+// Replacing a value changes a drawer, not the number of drawers. Insertion
+// and deletion return new dictionaries while the original remains readable.
+test "updates are persistent and replacement does not grow" {
+  let original = dict.from_list([#("a", 1), #("b", 2)])
+  let changed = original.insert("a", 9).insert("c", 3)
+  assert original.get("a") == Some(1)
+  assert changed.get("a") == Some(9)
+  assert changed.size() == 3
+  assert changed.has_key("c")
+  assert original.delete("a").size() == 1
+  assert original.delete("absent").size() == 2
+  assert !original.is_empty()
+}
+
+// Two entries arrive with the same key. Construction keeps the last value,
+// so duplicate input cannot quietly inflate the dictionary size.
+test "duplicate construction uses the last value" {
+  let values = dict.from_list([#(1, "old"), #(1, "new")])
+  assert values.size() == 1
+  assert values.get(1) == Some("new")
+  assert values.to_list() == [#(1, "new")]
+}
+
+// Map enumeration order is not the contract under test. Sorting the views
+// lets us inspect their contents without depending on the runtime traversal.
+test "keys values pairs and fold" {
+  let values = dict.from_list([#("a", 1), #("b", 2)])
+  assert list.sort(values.keys()) == ["a", "b"]
+  assert list.sort(values.values()) == [1, 2]
+  assert list.sort(values.to_list()) == [#("a", 1), #("b", 2)]
+  assert values.fold(0, fn(acc, _, value) { acc + value }) == 3
+}
+
+// The new dictionary stores Strings while its predecessor still stores Ints.
+// This checks the generic method result as well as the converted contents.
+test "map values changes the stored type" {
+  let values = dict.from_list([#("a", 1), #("b", 2)])
+  let mapped = values.map_values(int.to_string)
+  assert mapped.get("a") == Some("1")
+  assert mapped.get("b") == Some("2")
+  assert values.get("a") == Some(1)
+}
+
+// When both cabinets have b, the right-hand one supplies the merged value.
+// Filtering and merging must leave the original left-hand contents untouched.
+test "filter and right biased merge" {
+  let left = dict.from_list([#("a", 1), #("b", 2)])
+  let right = dict.from_list([#("b", 8), #("c", 3)])
+  assert left.filter(fn(_, v) { v > 1 }).to_list() == [#("b", 2)]
+  let merged = left.merge(right)
+  assert merged.size() == 3
+  assert merged.get("b") == Some(8)
+  assert left.get("b") == Some(2)
+}
+
+// A tuple is a whole key, not a pointer identity. The larger dictionary also
+// checks lookups and persistent insertion beyond the small-map examples.
+test "structural keys and large map" {
+  let keyed = dict.from_list([#(#(1, "a"), 7)])
+  assert keyed.get(#(1, "a")) == Some(7)
+  let values = dict.from_list(
+    list.map(list.range(0, 2000), fn(x) { #(x, x * x) })
+  )
+  assert values.size() == 2000
+  assert values.get(1999) == Some(3996001)
+  assert values.insert(2000, 4).size() == 2001
+  assert values.size() == 2000
+}
+
+// The methods carry implementation closures, but equality should open the
+// drawers and compare contents. Insertion order must not become part of equality.
+test "dictionary equality compares contents rather than capability closures" {
+  let first = dict.from_list([#("a", 1), #("b", 2)])
+  let reordered = dict.from_list([#("b", 2), #("a", 1)])
+  assert first.equals(reordered)
+  assert !first.equals(reordered.insert("a", 3))
+  assert !first.equals(reordered.delete("a"))
+  assert first.filter(fn(_, _) {
+    False
+  }).equals(
+    reordered.filter(fn(_, _) { False })
+  )
+}
+
+// No entries means no callback visits, even when a transformation changes
+// the result type. A fold still returns the initial value it was entrusted with.
+test "empty dictionary transformations preserve types without callbacks" {
+  let values: dict.Dict(String, Int) = dict.empty()
+  let mapped = values.map_values(fn(_) { panic as "empty map values" })
+  assert mapped.size() == 0
+  assert values.filter(fn(_, _) { panic as "empty dictionary filter" }).is_empty()
+  assert values.fold(17, fn(_, _, _) { panic as "empty dictionary fold" }) == 17
+  assert values.delete("absent").equals(values)
+}
+
+// A present drawer may itself contain None. The outer Some reports that the
+// key exists; removing it would confuse stored absence with a missing entry.
+test "dictionaries distinguish absent keys from stored None" {
+  let values = dict.from_list([#("present", None), #("number", Some(7))])
+  assert values.get("present") == Some(None)
+  assert values.has_key("present")
+  assert values.get("missing") == None
+  assert values.get("number") == Some(Some(7))
+}
+
+// The empty dictionary is an identity on either side of merge. A conflicting
+// key then checks right bias while both input dictionaries keep their old values.
+test "dictionary merge has empty identities and preserves both inputs" {
+  let values = dict.from_list([#("a", 1), #("b", 2)])
+  let empty: dict.Dict(String, Int) = dict.empty()
+  assert values.merge(empty).equals(values)
+  assert empty.merge(values).equals(values)
+  let replacement = dict.from_list([#("a", 9)])
+  assert values.merge(replacement).get("a") == Some(9)
+  assert replacement.get("a") == Some(9)
+  assert values.get("a") == Some(1)
+}

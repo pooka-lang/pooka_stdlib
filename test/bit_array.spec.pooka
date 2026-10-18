@@ -1,0 +1,112 @@
+//// A parcel need not end at the edge of a byte.
+////
+//// Bit arrays may contain partial bytes; text must still pass UTF-8 validation.
+//// We keep size, concatenation, byte slicing and decoding as separate promises.
+//// Known SHA-256 answers provide a reference outside our own conversion helpers.
+////
+//// ```pooka
+//// assert bit_array.bit_size(<<5:3>>) == 3
+//// ```
+
+module bit_array_test
+
+import pooka/bit_array
+import pooka/hash
+import pooka/int
+import pooka/string
+
+// A partial byte still occupies one byte when byte_size rounds upward.
+// Its bit count remains exact, and one zero bit is not an empty bit array.
+test "bit arrays report sizes" {
+  assert bit_array.byte_size(<<1, 2, 3>>) == 3
+  assert bit_array.bit_size(<<1:3>>) == 3
+  assert bit_array.byte_size(<<1:3>>) == 1
+  assert bit_array.is_empty(<<>>)
+  assert !bit_array.is_empty(<<0:1>>)
+}
+
+// Slices count whole bytes and must fit entirely inside the source. An empty
+// slice at the end is allowed; a negative offset or overrun returns a typed error.
+test "bit arrays join and slice" {
+  assert bit_array.append(<<1, 2>>, <<3>>) == <<1, 2, 3>>
+  assert bit_array.concat([<<1>>, <<>>, <<2, 3>>]) == <<1, 2, 3>>
+  assert bit_array.concat([]) == <<>>
+  assert bit_array.slice(<<1, 2, 3, 4>>, 1, 2) == Ok(<<2, 3>>)
+  assert bit_array.slice(<<1, 2>>, 2, 0) == Ok(<<>>)
+  assert bit_array.slice(<<1, 2>>, 1, 2)
+    == Error(bit_array.BitArrayError.OutOfRange)
+  assert bit_array.slice(<<1, 2>>, -1, 1)
+    == Error(bit_array.BitArrayError.OutOfRange)
+}
+
+// A parcel of bytes becomes text only after UTF-8 validation. Invalid bytes
+// and a non-byte-aligned value must return an error rather than partial text.
+test "bit arrays convert to and from UTF-8 text" {
+  assert bit_array.from_string("α🐇") == <<206, 177, 240, 159, 144, 135>>
+  assert bit_array.to_string(<<104, 105>>) == Ok("hi")
+  assert bit_array.to_string(<<255>>)
+    == Error(bit_array.BitArrayError.InvalidUtf8)
+  assert bit_array.to_string(<<1:3>>)
+    == Error(bit_array.BitArrayError.InvalidUtf8)
+}
+
+// Known answers for the empty input and abc anchor the digest test outside
+// our own code. The private formatter only makes the returned bytes readable.
+test "sha256 digests match the standard vectors" {
+  assert _hex(hash.sha256(<<>>))
+    == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  assert _hex(hash.sha256(bit_array.from_string("abc")))
+    == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+}
+
+/// Render each digest byte as two lowercase digits, including leading zeroes.
+/// Adding 256 gives a three-digit base-16 value; dropping its first digit keeps
+/// the remaining pair. For example, byte 5 becomes "105", then "05".
+_hex(bits: BitArray) -> String {
+  match bits {
+    <<byte:8, rest:bits>> -> {
+      let assert Ok(digits) = int.to_base(byte + 256, 16)
+      string.slice(digits, 1, 2) + _hex(rest)
+    }
+    _ -> ""
+  }
+}
+
+// Concatenation joins the actual bits without padding either input to a byte.
+// The expected five-bit value would differ if padding slipped between the pieces.
+test "concatenation preserves bits across unaligned boundaries" {
+  assert bit_array.append(<<5:3>>, <<3:2>>) == <<23:5>>
+  assert bit_array.concat([<<1:1>>, <<>>, <<0:1>>, <<3:2>>]) == <<11:4>>
+  assert bit_array.bit_size(bit_array.append(<<5:3>>, <<3:2>>)) == 5
+}
+
+// These inputs cover unfinished sequences, an overlong encoding, a surrogate
+// and a value above the Unicode limit. Empty text and NUL remain valid UTF-8.
+test "UTF8 validation rejects truncated overlong and surrogate sequences" {
+  loop invalid in [
+    <<194>>,
+    <<226, 130>>,
+    <<192, 175>>,
+    <<237, 160, 128>>,
+    <<244, 144, 128, 128>>
+  ] {
+    assert bit_array.to_string(invalid) == Error(
+      bit_array.BitArrayError.InvalidUtf8
+    )
+  }
+  assert bit_array.to_string(<<>>) == Ok("")
+  assert bit_array.to_string(<<0>>) == Ok("\u{0}")
+}
+
+// An empty slice is allowed only at a valid position. A negative length or
+// an empty slice beyond the end must not escape the range check.
+test "byte slices check empty ranges and negative lengths" {
+  assert bit_array.slice(<<>>, 0, 0) == Ok(<<>>)
+  assert bit_array.slice(<<1, 2>>, 0, 2) == Ok(<<1, 2>>)
+  assert bit_array.slice(<<1, 2>>, 3, 0) == Error(
+    bit_array.BitArrayError.OutOfRange
+  )
+  assert bit_array.slice(<<1, 2>>, 0, -1) == Error(
+    bit_array.BitArrayError.OutOfRange
+  )
+}
