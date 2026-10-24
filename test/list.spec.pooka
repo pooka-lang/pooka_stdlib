@@ -1,0 +1,183 @@
+//// A procession with room for nobody.
+////
+//// Lists keep their encounter order, even when a visitor maps, filters or folds
+//// the procession. These tests begin with the empty list, walk through boundaries
+//// and persistence, then give sorting enough repeated keys to reveal its manners.
+////
+//// ```pooka
+//// assert list.take([1, 2, 3], 2) == [1, 2]
+//// ```
+
+module list_test
+
+import pooka/list
+import pooka/order.{Order}
+
+// The empty procession has length zero. The larger range also exercises the
+// length walk beyond the tiny lists used by the other examples.
+test "empty lists and length" {
+  assert list.empty() == []
+  assert list.is_empty([])
+  assert !list.is_empty([1])
+  assert list.length([1, 2, 3]) == 3
+  assert list.length(list.range(0, 10000)) == 10000
+}
+
+// An absent element stays inside None. Negative and just-past-the-end indexes
+// must not become an accidental head or an Erlang exception.
+test "first last and indexed access" {
+  assert list.first([]) == None
+  assert list.first([2, 3]) == Some(2)
+  assert list.last([]) == None
+  assert list.last([2, 3]) == Some(3)
+  assert list.at([4, 5], 0) == Some(4)
+  assert list.at([4, 5], 1) == Some(5)
+  assert list.at([4], 1) == None
+  assert list.at([4], -1) == None
+}
+
+// Keep the original list on the desk while building its neighbours. Checking
+// it afterward catches an update that forgot its promise of persistence.
+test "persistent list construction" {
+  let original = [2, 3]
+  assert list.prepend(original, 1) == [1, 2, 3]
+  assert list.append(original, 4) == [2, 3, 4]
+  assert list.concat([1, 2], [3, 4]) == [1, 2, 3, 4]
+  assert list.concat([], original) == original
+  assert original == [2, 3]
+}
+
+// Mapping may change the element type, but each result keeps its old place
+// in the line. Reversal is the operation that deliberately changes that order.
+test "reverse and map preserve ordering" {
+  assert list.reverse([1, 2, 3]) == [3, 2, 1]
+  assert list.reverse([]) == []
+  assert list.map([1, 2, 3], fn(x) { x * 2 }) == [2, 4, 6]
+  assert list.map([1, 2], fn(x) { #(x, True) }) == [#(1, True), #(2, True)]
+}
+
+// Filtering keeps the original values; filter_map may replace or omit them.
+// The empty input also checks that there is nothing to unwrap.
+test "filter and filter map" {
+  assert list.filter([1, 2, 3, 4], fn(x) { x % 2 == 0 }) == [2, 4]
+  assert list.filter_map([1, 2, 3], fn(x) {
+    match x % 2 {
+      0 -> Some(x * 10)
+      _ -> None
+    }
+  }) == [20]
+  assert list.filter_map([], fn(x) { Some(x) }) == []
+}
+
+// The empty list gives any and all different answers: no witness for any,
+// and no counterexample for all. The fold must keep its supplied seed.
+test "fold and predicates" {
+  assert list.fold([1, 2, 3], 0, fn(acc, x) { acc + x }) == 6
+  assert list.fold([], 7, fn(acc, x) { acc + x }) == 7
+  assert list.find([1, 2, 4], fn(x) { x % 2 == 0 }) == Some(2)
+  assert list.find([1], fn(x) { x == 9 }) == None
+  assert list.any([1, 2], fn(x) { x == 2 })
+  assert !list.any([], fn(_) { True })
+  assert list.all([], fn(_) { False })
+  assert !list.all([1, 2], fn(x) { x == 1 })
+  assert list.contains([1, 2], 2)
+  assert !list.contains([], 2)
+}
+
+// Once the answer is settled, the remaining predicate is an unopened door.
+// A panic behind that door catches traversal that should already have stopped.
+test "predicates short circuit" {
+  assert list.any([1, 2], fn(x) {
+    match x {
+      1 -> True
+      _ -> panic as "must not run"
+    }
+  })
+  assert !list.all([1, 2], fn(x) {
+    match x {
+      1 -> False
+      _ -> panic as "must not run"
+    }
+  })
+}
+
+// Counts are requests, not permission to step outside the list. Negative
+// counts act like zero; oversized counts consume only the elements available.
+test "take and drop clamp counts" {
+  assert list.take([1, 2, 3], 2) == [1, 2]
+  assert list.drop([1, 2, 3], 2) == [3]
+  assert list.take([1], 100) == [1]
+  assert list.drop([1], 100) == []
+  assert list.take([1], -1) == []
+  assert list.drop([1], -1) == [1]
+}
+
+// The labels a and c remember the order of equal keys. A sort can order the
+// keys correctly and still be wrong if it swaps those two passengers.
+test "sorting uses Order and remains stable" {
+  assert list.sort([3, 1, 2, 1]) == [1, 1, 2, 3]
+  assert list.sort([]) == []
+  assert list.sort_by([1, 3, 2], fn(a, b) {
+    match a > b {
+      True -> Order.Less
+      False -> Order.Greater
+    }
+  }) == [3, 2, 1]
+  assert list.sort_by([#(2, "a"), #(1, "b"), #(2, "c")], fn(a, b) {
+    let #(x, _) = a
+    let #(y, _) = b
+    order.from_int(x - y)
+  }) == [#(1, "b"), #(2, "a"), #(2, "c")]
+}
+
+// Unique keeps the first sighting rather than sorting the collection. Range
+// includes its starting point and stops just before its ending point.
+test "unique preserves first occurrences and range is exclusive" {
+  assert list.unique([3, 1, 3, 2, 1]) == [3, 1, 2]
+  assert list.range(-2, 2) == [-2, -1, 0, 1]
+  assert list.range(3, 3) == []
+  assert list.range(4, 2) == []
+}
+
+// A few thousand values give recursive transformations a longer journey.
+// The assertions check ordering and contents, without setting a timing budget.
+test "large transformations and sort" {
+  let values = list.range(0, 3000)
+  assert list.reverse(list.reverse(values)) == values
+  assert list.sort(list.reverse(values)) == values
+  assert list.length(list.filter(values, fn(x) { x % 3 == 0 })) == 1000
+}
+
+// The value after the first match is deliberately unfriendly. Reaching it
+// would mean find kept searching after it already had its answer.
+test "find stops at the first matching value" {
+  assert list.find([1, 2, 3], fn(value) {
+    match value {
+      1 -> False
+      2 -> True
+      _ -> panic as "find continued after its match"
+    }
+  }) == Some(2)
+}
+
+// An empty collection owes no visits to its callbacks. Every callback here
+// panics, so a successful result also checks that none was evaluated.
+test "empty transformations do not invoke their callbacks" {
+  assert list.map([], fn(_) { panic as "empty map" }) == []
+  assert list.filter([], fn(_) { panic as "empty filter" }) == []
+  assert list.filter_map([], fn(_) { panic as "empty filter map" }) == []
+  assert list.find([], fn(_) { panic as "empty find" }) == None
+  assert list.fold([], 42, fn(_, _) { panic as "empty fold" }) == 42
+}
+
+// Subtraction exposes fold direction because it is not associative. The
+// odd values in filter_map remember encounter order through their replacements.
+test "fold is left associative and filter map retains encounter order" {
+  assert list.fold([1, 2, 3], 10, fn(acc, value) { acc - value }) == 4
+  assert list.filter_map([5, 2, 7, 4, 1], fn(value) {
+    match value % 2 {
+      1 -> Some(value * 10)
+      _ -> None
+    }
+  }) == [50, 70, 10]
+}

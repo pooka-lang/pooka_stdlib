@@ -1,0 +1,171 @@
+//// Numbers bring their boundaries to the table.
+////
+//// Integer arithmetic can grow past a machine word, while a Float has finite
+//// room. Parsing, rounding and checked arithmetic must preserve their own rules
+//// and return typed errors when the requested operation has no allowed answer.
+////
+//// ```pooka
+//// assert int.divide(-7, 2) == Ok(-3)
+//// ```
+
+module numeric_test
+
+import pooka/int
+import pooka/float
+import pooka/bool
+import pooka/bit
+import pooka/order.{Order}
+
+// The parser reads the entire envelope. A sign and leading zeroes are fine;
+// whitespace or an unconsumed suffix must return the original text in ParseError.
+test "strict integer parsing" {
+  assert int.parse("42") == Ok(42)
+  assert int.parse("-42") == Ok(-42)
+  assert int.parse("+42") == Ok(42)
+  assert int.parse("0002") == Ok(2)
+  assert int.parse("") == Error(int.ParseError(""))
+  assert int.parse(" 2") == Error(int.ParseError(" 2"))
+  assert int.parse("2x") == Error(int.ParseError("2x"))
+}
+
+// Negative parity and reversed clamp bounds are easy places to trip. These
+// small signed examples keep those rules beside the ordinary conversion checks.
+test "integer utilities" {
+  assert int.to_string(-45) == "-45"
+  assert int.abs(-3) == 3
+  assert int.min(2, 3) == 2
+  assert int.max(2, 3) == 3
+  assert int.clamp(10, 0, 5) == 5
+  assert int.clamp(-2, 5, 0) == 0
+  assert int.is_even(-4)
+  assert int.is_odd(-3)
+  assert int.to_float(3) == Ok(3.0)
+}
+
+// The integer can keep growing after a machine word runs out of room. Its
+// conversion to Float may fail, and a negative exponent has a separate typed error.
+test "integer power is arbitrary precision" {
+  assert int.pow(2, 100) == Ok(1267650600228229401496703205376)
+  assert int.pow(-2, 3) == Ok(-8)
+  let assert Ok(huge) = int.pow(10, 1000)
+  assert int.to_float(huge) == Error(int.MathError.FloatOutOfRange)
+  assert int.pow(0, 0) == Ok(1)
+  assert int.pow(2, -1) == Error(int.MathError.NegativeExponent)
+}
+
+// Decimal and exponent spellings share the Float parser. Whitespace and NaN
+// are rejected; the final overflow check only rules out silently returning zero.
+test "float parsing accepts decimals and exponents" {
+  assert float.parse("1.25") == Ok(1.25)
+  assert float.parse("1") == Ok(1.0)
+  assert float.parse("-1e3") == Ok(-1000.0)
+  assert float.parse("+.5") == Ok(0.5)
+  assert float.parse(" 1.0") == Error(float.ParseError(" 1.0"))
+  assert float.parse("NaN") == Error(float.ParseError("NaN"))
+  assert float.parse("1e9999") != Ok(0.0)
+}
+
+// Negative fractions distinguish floor, ceiling and truncation. Halfway
+// rounding checks both signs, while a finite value anchors the classification calls.
+test "float utilities and rounding" {
+  assert float.parse(float.to_string(1.25)) == Ok(1.25)
+  assert float.abs(-1.25) == 1.25
+  assert float.min(1.0, 2.0) == 1.0
+  assert float.max(1.0, 2.0) == 2.0
+  assert float.clamp(8.0, 0.0, 3.0) == 3.0
+  assert float.floor(-1.2) == -2
+  assert float.ceil(-1.2) == -1
+  assert float.round(1.5) == 2
+  assert float.round(-1.5) == -2
+  assert float.truncate(-1.9) == -1
+  assert float.is_finite(1.0)
+  assert !float.is_nan(1.0)
+}
+
+// A negative square root, a fractional power of a negative base and overflow
+// should arrive as MathError values. No runtime exception needs to leave the room.
+test "invalid mathematical domains return typed errors" {
+  assert float.sqrt(9.0) == Ok(3.0)
+  assert float.pow(2.0, 3.0) == Ok(8.0)
+  let assert Error(float.MathError(_)) = float.sqrt(-1.0)
+  let assert Error(float.MathError(_)) = float.pow(-1.0, 0.5)
+  let assert Error(float.MathError(_)) = float.pow(1.0e308, 2.0)
+}
+
+// Boolean text follows the language spelling exactly. A lowercase true is
+// not an alternate invitation accepted by this parser.
+test "boolean parsing is exact" {
+  assert bool.to_string(True) == "True"
+  assert bool.to_string(False) == "False"
+  assert bool.parse("True") == Ok(True)
+  assert bool.parse("False") == Ok(False)
+  assert bool.parse("true") == Error(bool.ParseError.InvalidBoolean)
+  assert bool.not(False)
+}
+
+// Bit operations use arbitrary-precision signed integers. A distant left
+// shift checks width, while a negative right shift checks sign extension.
+test "integer bit primitives" {
+  assert bit.and(12, 10) == 8
+  assert bit.or(12, 10) == 14
+  assert bit.xor(12, 10) == 6
+  assert bit.not(0) == -1
+  assert bit.shift_left(1, 100) == Ok(1267650600228229401496703205376)
+  assert bit.shift_right(-9, 1) == Ok(-5)
+}
+
+// Counts and positions have different error constructors. A negative value
+// must be rejected by the appropriate checked operation before shifting anything.
+test "bit positions and invalid counts" {
+  assert bit.is_set(8, 3) == Ok(True)
+  assert bit.is_set(8, 2) == Ok(False)
+  assert bit.set(0, 3) == Ok(8)
+  assert bit.clear(15, 3) == Ok(7)
+  assert bit.shift_left(1, -1) == Error(bit.BitError.NegativeCount)
+  assert bit.shift_right(1, -1) == Error(bit.BitError.NegativeCount)
+  assert bit.is_set(1, -1) == Error(bit.BitError.NegativePosition)
+  assert bit.set(1, -1) == Error(bit.BitError.NegativePosition)
+  assert bit.clear(1, -1) == Error(bit.BitError.NegativePosition)
+}
+
+// Only the sign of an integer matters when building Order. Reversal swaps
+// Less and Greater while leaving Equal exactly where it was.
+test "Order values and reversal" {
+  assert order.from_int(-9) == Order.Less
+  assert order.from_int(0) == Order.Equal
+  assert order.from_int(9) == Order.Greater
+  assert order.reverse(Order.Less) == Order.Greater
+  assert order.reverse(Order.Greater) == Order.Less
+  assert order.reverse(Order.Equal) == Order.Equal
+}
+
+// Signed division moves toward zero, and the remainder follows the dividend.
+// The large input also guards against taking a detour through floating point.
+test "integer division truncates toward zero" {
+  assert int.divide(7, 2) == Ok(3)
+  assert int.divide(-7, 2) == Ok(-3)
+  assert int.divide(7, -2) == Ok(-3)
+  assert int.divide(18446744073709551615, 3) == Ok(6148914691236517205)
+  assert int.divide(1, 0) == Error(int.MathError.DivisionByZero)
+  assert int.remainder(7, 3) == Ok(1)
+  assert int.remainder(-7, 3) == Ok(-1)
+  assert int.remainder(7, -3) == Ok(1)
+  assert int.remainder(1, 0) == Error(int.MathError.DivisionByZero)
+}
+
+// Base conversion keeps the sign outside the digits and accepts either letter
+// case on input. Invalid bases and digits must remain checked failures.
+test "integers convert to and from other bases" {
+  assert int.to_base(255, 16) == Ok("ff")
+  assert int.to_base(-255, 16) == Ok("-ff")
+  assert int.to_base(5, 2) == Ok("101")
+  assert int.to_base(35, 36) == Ok("z")
+  assert int.to_base(1, 1) == Error(int.MathError.InvalidBase)
+  assert int.to_base(1, 37) == Error(int.MathError.InvalidBase)
+  assert int.parse_base("ff", 16) == Ok(255)
+  assert int.parse_base("FF", 16) == Ok(255)
+  assert int.parse_base("-101", 2) == Ok(-5)
+  assert int.parse_base("12", 2) == Error(int.ParseError("12"))
+  assert int.parse_base("", 16) == Error(int.ParseError(""))
+  assert int.parse_base("1", 40) == Error(int.ParseError("1"))
+}
