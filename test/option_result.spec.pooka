@@ -1,0 +1,94 @@
+//// Open only the envelope that arrived.
+////
+//// Option records presence; Result carries success or a reason for failure.
+//// The callbacks below must visit only the branch they belong to. A panic inside
+//// an unused callback is our little bell: if the library calls it, the test fails.
+////
+//// ```pooka
+//// assert option.to_result(Some(None), "missing") == Ok(None)
+//// ```
+
+module option_result_test
+
+import pooka/option
+import pooka/result
+
+// Mapping wraps a transformed value; flat_map accepts an already wrapped
+// answer. Neither operation should manufacture a value where None arrived.
+test "Option transforms" {
+  assert option.map(Some(2), fn(x) { x * 3 }) == Some(6)
+  assert option.map(None, fn(x) { x * 3 }) == None
+  assert option.flat_map(Some(2), fn(x) { Some(x + 1) }) == Some(3)
+  assert option.flat_map(None, fn(x) { Some(x) }) == None
+}
+
+// A fallback function waits until absence asks for it. The panic checks
+// that a present value can leave the fallback asleep.
+test "Option defaults are lazy" {
+  assert option.unwrap_or(Some(2), 9) == 2
+  assert option.unwrap_or(None, 9) == 9
+  assert option.unwrap_or_else(Some(2), fn() { panic as "unused" }) == 2
+  assert option.unwrap_or_else(None, fn() { 9 }) == 9
+  assert option.is_some(Some(2))
+  assert option.is_none(None)
+  assert option.to_result(Some(2), "missing") == Ok(2)
+  assert option.to_result(None, "missing") == Error("missing")
+}
+
+// The two Result branches have their own visitors. Mapping the success
+// leaves Error alone, and mapping the error leaves Ok alone.
+test "Result maps successes and errors" {
+  assert result.map(Ok(2), fn(x) { x + 1 }) == Ok(3)
+  assert result.map(Error("x"), fn(x) { x + 1 }) == Error("x")
+  assert result.map_error(Error(2), fn(x) { x + 1 }) == Error(3)
+  assert result.map_error(Ok(2), fn(_) { panic as "unused" }) == Ok(2)
+}
+
+// Chaining forwards an existing error without another callback visit.
+// Defaults and conversions then check how that same branch is opened or discarded.
+test "Result chaining and defaults" {
+  assert result.flat_map(Ok(2), fn(x) { Ok(x + 1) }) == Ok(3)
+  assert result.flat_map(Error("x"), fn(_) { panic as "unused" }) == Error("x")
+  assert result.unwrap_or(Ok(2), 9) == 2
+  assert result.unwrap_or(Error("x"), 9) == 9
+  assert result.unwrap_or_else(Ok(2), fn(_) { panic as "unused" }) == 2
+  assert result.unwrap_or_else(Error(2), fn(x) { x + 1 }) == 3
+  assert result.is_ok(Ok(2))
+  assert result.is_error(Error("x"))
+  assert result.to_option(Ok(2)) == Some(2)
+  assert result.to_option(Error("x")) == None
+}
+
+// None carries no argument to pass to a callback. The panics make accidental
+// visits observable, and a callback may itself return None from a present input.
+test "absent options never invoke transformation callbacks" {
+  assert option.map(None, fn(_) { panic as "absent map" }) == None
+  assert option.flat_map(None, fn(_) { panic as "absent flat map" }) == None
+  assert option.flat_map(Some(3), fn(_) { None }) == None
+  assert !option.is_none(Some(3))
+  assert !option.is_some(None)
+}
+
+// A transformation must preserve the branch it does not handle, including
+// the original payload. A successful chain is also allowed to produce a new error.
+test "result transformations preserve the inactive branch" {
+  assert result.map(Error("original"), fn(_) {
+    panic as "error map"
+  }) == Error("original")
+  assert result.flat_map(Ok(3), fn(_) { Error("next") }) == Error("next")
+  assert result.map_error(Ok(3), fn(_) { panic as "success map error" }) == Ok(
+    3
+  )
+  assert !result.is_error(Ok(3))
+  assert !result.is_ok(Error("original"))
+}
+
+// Two envelopes describe two different kinds of absence. Some(None) says
+// the outer value is present; converting it must preserve that distinction.
+test "nested options preserve present absence" {
+  assert option.map(Some(None), fn(value) { option.is_none(value) }) == Some(
+    True
+  )
+  assert option.to_result(Some(None), "missing") == Ok(None)
+  assert result.to_option(Ok(None)) == Some(None)
+}

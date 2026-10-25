@@ -1,0 +1,67 @@
+//// A map can be folded without walking the road.
+////
+//// Most path operations here are lexical: they rearrange components without
+//// opening files. Current-directory checks are kept separate from normalization
+//// so a path that does not exist can still have a perfectly useful spelling.
+////
+//// ```pooka
+//// assert path.normalize("a/../b") == "b"
+//// ```
+
+module path_test
+
+import pooka/path
+import pooka/env
+import pooka/string
+
+// The final suffix belongs to extension, while stem removes only that suffix.
+// A dotfile has a name, but its leading dot is not a filename extension.
+test "join basename dirname extension and stem" {
+  assert path.join([]) == "."
+  assert path.join(["a", "b", "c"]) == "a/b/c"
+  assert path.basename("/a/b.txt") == "b.txt"
+  assert path.dirname("/a/b.txt") == "/a"
+  assert path.extension("/a/b.tar.gz") == Some(".gz")
+  assert path.extension("README") == None
+  assert path.extension(".gitignore") == None
+  assert path.stem("/a/b.tar.gz") == "b.tar"
+}
+
+// These are POSIX-style path checks: a leading slash anchors a path at the
+// root. The two predicates should disagree for both spellings used here.
+test "absolute and relative predicates" {
+  assert path.is_absolute("/a")
+  assert !path.is_relative("/a")
+  assert path.is_relative("a")
+  assert !path.is_absolute("a")
+}
+
+// Parents cancel ordinary components, but cannot climb above an absolute
+// root. Relative paths retain parents that have no earlier component to cancel.
+test "normalization is lexical and handles parents" {
+  assert path.normalize("a/./b/../c") == "a/c"
+  assert path.normalize("/../../a") == "/a"
+  assert path.normalize("a/../../b") == "../b"
+  assert path.normalize("../..") == "../.."
+  assert path.normalize(".") == "."
+  assert path.normalize("") == "."
+}
+
+// The second argument is the starting desk, not the destination. Identical
+// paths return a dot; moving to a parent requires one upward step.
+test "relative paths compare against explicit base" {
+  assert path.relative("/a/b/c", "/a/d") == Ok("../b/c")
+  assert path.relative("/a/b", "/a/b") == Ok(".")
+  assert path.relative("/a/b", "/a") == Ok("b")
+  assert path.relative("/a", "/a/b") == Ok("..")
+}
+
+// Absolute paths borrow the current directory but need not visit the target.
+// The missing path deliberately checks lexical construction without filesystem lookup.
+test "absolute uses the current directory without resolving symlinks" {
+  let assert Ok(cwd) = env.current_directory()
+  assert path.absolute(".") == Ok(path.normalize(cwd))
+  assert path.absolute("/a/../b") == Ok("/b")
+  let assert Ok(value) = path.absolute("future/missing")
+  assert string.ends_with(value, "/future/missing")
+}
