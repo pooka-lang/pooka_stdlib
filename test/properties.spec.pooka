@@ -1,0 +1,223 @@
+//// Ask the same question along a longer stretch of road.
+////
+//// These are deterministic law checks over fixed ranges and chosen edge cases.
+//// They compare operations that should agree, including collection identities,
+//// signed arithmetic and Unicode round trips. They are repeatable examples,
+//// not random sampling or proofs about every possible value.
+////
+//// ```pooka
+//// assert list.reverse(list.reverse([1, 2, 3])) == [1, 2, 3]
+//// ```
+
+module properties_test
+
+import pooka/list
+import pooka/dict
+import pooka/set
+import pooka/int
+import pooka/float
+import pooka/bit
+import pooka/string
+import pooka/option
+import pooka/result
+import pooka/order
+import pooka/bit_array
+
+// The same identities walk through empty, tiny and larger lists. Splitting
+// then rejoining must recover the original list even when the split exceeds its size.
+test "list algebra over many list sizes" {
+  loop size in list.range(0, 129) {
+    let values = list.range(0, size)
+    assert list.reverse(list.reverse(values)) == values
+    assert list.concat(list.take(values, 3), list.drop(values, 3)) == values
+    assert list.map(values, fn(x) { x }) == values
+    assert list.length(values) == size
+  }
+}
+
+// A fixed modular sequence supplies duplicates and negative values. These
+// checks cover size, membership and idempotence; they do not alone prove a full sort.
+test "sorting orders preserves membership and is idempotent" {
+  loop size in list.range(0, 100) {
+    let input = list.map(list.range(0, size), fn(i) { (i * 31) % 17 - 8 })
+    let sorted = list.sort(input)
+    assert list.sort(sorted) == sorted
+    assert list.length(sorted) == size
+    assert list.all(input, fn(value) { list.contains(sorted, value) })
+    assert list.sort(list.unique(input)) == list.unique(sorted)
+  }
+}
+
+// Keep two versions of each dictionary alive together. Replacement and
+// deletion must leave the earlier version readable with its original size and value.
+test "dictionary updates and deletion preserve previous versions" {
+  loop size in list.range(1, 100) {
+    let values = dict.from_list(
+      list.map(list.range(0, size), fn(x) { #(x, x) })
+    )
+    let changed = values.insert(0, -1)
+    assert values.get(0) == Some(0)
+    assert changed.get(0) == Some(-1)
+    assert changed.size() == size
+    assert changed.delete(0).size() == size - 1
+    assert changed.delete(0).get(0) == None
+    assert values.size() == size
+  }
+}
+
+// The list supplies another way to calculate sums, filtered counts and
+// converted values. Map traversal order is removed only where the assertion needs it.
+test "dictionary map fold and filter agree with list operations" {
+  loop size in list.range(0, 100) {
+    let values = list.range(0, size)
+    let map = dict.from_list(list.map(values, fn(x) { #(x, x) }))
+    assert map.fold(0, fn(acc, _, value) {
+      acc + value
+    }) == list.fold(values, 0, fn(acc, x) {
+      acc + x
+    })
+    assert map.filter(fn(_, v) {
+      v % 2 == 0
+    }).size() == list.length(
+      list.filter(values, fn(x) { x % 2 == 0 })
+    )
+    let text = map.map_values(int.to_string)
+    assert text.size() == size
+    assert list.sort(
+      text.values()
+    ) == list.sort(
+      list.map(values, int.to_string)
+    )
+  }
+}
+
+// Overlapping ranges give the laws both shared and private members. Each
+// loop checks subset relationships, disjoint difference and idempotent union.
+test "set algebra laws over overlapping ranges" {
+  loop size in list.range(0, 100) {
+    let a = set.from_list(list.range(0, size))
+    let b = set.from_list(list.range(size - 5, size + 5))
+    assert a.is_subset(a.union(b))
+    assert b.is_subset(a.union(b))
+    assert a.intersection(b).is_subset(a)
+    assert a.intersection(b).is_subset(b)
+    assert a.difference(b).intersection(b).is_empty()
+    assert a.difference(a).is_empty()
+    assert a.union(a).size() == a.size()
+  }
+}
+
+// These modest signed values fit exactly into Float. Their round trip also
+// checks that even and odd remain complementary on either side of zero.
+test "integer text and float conversion round trip signed values" {
+  loop value in list.range(-1000, 1001) {
+    assert int.parse(int.to_string(value)) == Ok(value)
+    let assert Ok(floating) = int.to_float(value)
+    assert float.truncate(floating) == value
+    assert int.is_even(value) != int.is_odd(value)
+  }
+}
+
+// Each chosen position lights one bit, including positions beyond a native
+// word. Clearing, shifting and complementing must agree about where it was lit.
+test "bit setting clearing and testing work beyond machine words" {
+  loop position in list.range(0, 257) {
+    let assert Ok(mask) = bit.set(0, position)
+    assert bit.is_set(mask, position) == Ok(True)
+    assert bit.clear(mask, position) == Ok(0)
+    assert bit.xor(mask, mask) == 0
+    assert bit.shift_right(mask, position) == Ok(1)
+    assert bit.and(mask, bit.not(mask)) == 0
+  }
+}
+
+// The sample includes a bare combining mark and whitespace. Splitting into
+// code points and joining again must keep every one, without normalization.
+test "string composition preserves Unicode code points" {
+  loop text in ["", "a", "α🐇", "é", "日本語", "\n\t", "\u{301}"] {
+    assert string.join(string.split(text, ""), "") == text
+    assert string.slice(text, 0, string.length(text)) == text
+    assert string.length(string.repeat(text, 3)) == string.length(text) * 3
+    assert string.concat(text, "") == text
+  }
+}
+
+// Option and Result take different routes to the same transformed value.
+// The fixed signed range checks that their wrappers preserve the common result.
+test "Option and Result transformations compose" {
+  loop value in list.range(-100, 101) {
+    let mapped = option.map(Some(value), fn(x) { x + 1 })
+    assert option.to_result(mapped, "missing") == Ok(value + 1)
+    assert result.to_option(result.map(Ok(value), fn(x) { x + 1 })) == mapped
+    assert result.unwrap_or(option.to_result(mapped, "missing"), 0) == value + 1
+  }
+}
+
+// These powers of two fit exactly in Float. Agreement in this chosen range
+// checks conversion and exponentiation without claiming arbitrary Float precision.
+test "integer and float powers agree on representable values" {
+  loop exponent in list.range(0, 30) {
+    let assert Ok(integer) = int.pow(2, exponent)
+    let assert Ok(expected) = int.to_float(integer)
+    let assert Ok(power) = int.to_float(exponent)
+    assert float.pow(2.0, power) == Ok(expected)
+  }
+}
+
+// Every supported base gets both signs and zero. Rendering and parsing
+// should undo one another for each selected value without losing its sign.
+test "every integer base round trips positive and negative values" {
+  loop base in list.range(2, 37) {
+    loop value in [-65537, -255, -1, 0, 1, 255, 65537] {
+      let assert Ok(text) = int.to_base(value, base)
+      assert int.parse_base(text, base) == Ok(value)
+    }
+  }
+}
+
+// Quotient and remainder must put the dividend back together. Their magnitude
+// and sign checks catch an implementation that rounds division in the wrong direction.
+test "division and remainder reconstruct signed dividends" {
+  loop dividend in list.range(-32, 33) {
+    loop divisor in [-7, -3, -1, 1, 3, 7] {
+      let assert Ok(quotient) = int.divide(dividend, divisor)
+      let assert Ok(remainder) = int.remainder(dividend, divisor)
+      assert quotient * divisor + remainder == dividend
+      assert int.abs(remainder) < int.abs(divisor)
+      assert remainder == 0 || (remainder < 0) == (dividend < 0)
+    }
+  }
+}
+
+// Original indexes serve as seat numbers within four equal-key groups.
+// Filtering each sorted group must recover its original encounter order exactly.
+test "stable sorting preserves encounter order within equal groups" {
+  let input = list.map(list.range(0, 96), fn(index) { #(index % 4, index) })
+  let sorted = list.sort_by(input, fn(left, right) {
+    let #(left_key, _) = left
+    let #(right_key, _) = right
+    order.from_int(left_key - right_key)
+  })
+  loop key in list.range(0, 4) {
+    let group = list.filter(sorted, fn(pair) {
+      let #(value, _) = pair
+      value == key
+    })
+    assert group == list.filter(input, fn(pair) {
+      let #(value, _) = pair
+      value == key
+    })
+  }
+  assert list.length(sorted) == list.length(input)
+}
+
+// Text travels through a byte parcel and returns unchanged, including NULs
+// and combining marks. UTF-8 output is byte aligned and ignores an empty concatenation.
+test "bit array text round trips preserve Unicode and null bytes" {
+  loop text in ["", "ASCII", "α🐇", "é", "日本語", "\u{0}x\u{0}"] {
+    let bits = bit_array.from_string(text)
+    assert bit_array.to_string(bits) == Ok(text)
+    assert bit_array.bit_size(bits) == bit_array.byte_size(bits) * 8
+    assert bit_array.concat([bits, <<>>]) == bits
+  }
+}

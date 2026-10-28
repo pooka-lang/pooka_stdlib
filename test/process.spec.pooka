@@ -1,0 +1,118 @@
+//// Listen at both doors when a subprocess speaks.
+////
+//// A command has stdout, stderr and an exit status; none should swallow another.
+//// These tests also check literal arguments, EOF, output draining and deadlines.
+//// They use POSIX utilities on the Linux and macOS environments supported here.
+////
+//// ```pooka
+//// let assert Ok(output) = process.run("printf", ["%s", "hello"])
+//// assert output.stdout == "hello"
+//// ```
+
+module process_test
+
+import pooka/process
+import pooka/env
+import pooka/string
+
+// A successful process returns all three pieces of its report. The Unicode
+// argument also checks that stdout survives the port boundary without alteration.
+test "process pid and stdout capture" {
+  assert process.pid() > 0
+  let assert Ok(output) = process.run("printf", ["%s", "hello 🐇"])
+  assert output.status == 0
+  assert output.stdout == "hello 🐇"
+  assert output.stderr == ""
+  assert output.succeeded()
+}
+
+// Exit status seven is a completed command with a failing status, not a
+// launcher error. Its stdout and stderr still belong in separate fields.
+test "stdout stderr and nonzero exit are separate" {
+  let assert Ok(output) = process.run(
+    "sh",
+    ["-c", "printf output; printf failure >&2; exit 7"]
+  )
+  assert output.status == 7
+  assert output.stdout == "output"
+  assert output.stderr == "failure"
+  assert !output.succeeded()
+}
+
+// The shell-looking text is only an argument to printf. If a launcher
+// interpolates it through a shell, the returned text will betray that extra visit.
+test "arguments are not shell interpolated" {
+  let input = "$(printf WRONG); * \" \n🐇"
+  let assert Ok(output) = process.run("printf", ["%s", input])
+  assert output.stdout == input
+  assert output.stderr == ""
+}
+
+// The command borrows an explicit working directory. A missing executable
+// and a missing directory must instead return ProcessError during launch.
+test "explicit working directory and failures" {
+  let assert Ok(cwd) = env.current_directory()
+  let assert Ok(output) = process.run_in("pwd", [], cwd)
+  assert string.trim(output.stdout) == cwd
+  let assert Error(process.ProcessError(_)) = process.run(
+    "pooka-certainly-missing-command-59831",
+    []
+  )
+  let assert Error(process.ProcessError(_)) = process.run_in(
+    "pwd",
+    [],
+    "/pooka-certainly-missing-directory"
+  )
+}
+
+// Twenty thousand characters encourage the port reader to drain output
+// while the child is alive. We check the full size, not just a successful exit.
+test "large output drains the port without deadlock" {
+  let assert Ok(output) = process.run(
+    "sh",
+    ["-c", "i=0; while [ $i -lt 2000 ]; do printf abcdefghij; i=$((i+1)); done"]
+  )
+  assert string.length(output.stdout) == 20000
+  assert output.status == 0
+}
+
+// With no input to offer, the launcher must close stdin so cat can finish.
+// The missing absolute executable separately checks a failed direct launch.
+test "processes with no supplied input receive EOF" {
+  let assert Ok(output) = process.run("cat", [])
+  assert output.status == 0
+  assert output.stdout == ""
+  let assert Error(process.ProcessError(_)) = process.run(
+    "/pooka-certainly-missing-executable",
+    []
+  )
+}
+
+// The deadline wrapper keeps a completed process inside Some, even when
+// its status is nonzero. Both output streams must survive that extra envelope.
+test "commands finishing before the deadline report their output" {
+  let assert Ok(Some(output)) = process.run_with_timeout(
+    "sh",
+    ["-c", "printf done; printf note >&2; exit 3"],
+    5000
+  )
+  assert output.status == 3
+  assert output.stdout == "done"
+  assert output.stderr == "note"
+}
+
+// A timed-out child returns Ok(None), distinct from an invalid deadline or
+// a launch failure. The sleeping command leaves enough room for the shorter timer.
+test "commands past the deadline are stopped" {
+  let assert Ok(None) = process.run_with_timeout("sleep", ["5"], 100)
+  let assert Error(process.ProcessError(_)) = process.run_with_timeout(
+    "sleep",
+    ["1"],
+    -1
+  )
+  let assert Error(process.ProcessError(_)) = process.run_with_timeout(
+    "pooka-command-that-does-not-exist",
+    [],
+    100
+  )
+}
