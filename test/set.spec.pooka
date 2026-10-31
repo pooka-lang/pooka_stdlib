@@ -1,0 +1,91 @@
+//// An invitation list with one chair for each value.
+////
+//// Duplicates do not buy another chair. The tests check persistent membership
+//// changes and the laws of union, intersection and difference. Structural members
+//// keep their complete shape, including the order of lists stored inside tuples.
+////
+//// ```pooka
+//// assert set.from_list([1, 1, 2]).size() == 2
+//// ```
+
+module set_test
+
+import pooka/set
+import pooka/list
+
+// Repeated invitations still reserve one seat. The explicitly typed empty
+// set and the deduplicated set must agree with their membership and size views.
+test "empty and duplicate set values" {
+  let empty: set.Set(Int) = set.empty()
+  assert empty.is_empty()
+  assert empty.size() == 0
+  assert !empty.contains(1)
+  let values = set.from_list([1, 2, 1, 3])
+  assert values.size() == 3
+  assert list.sort(values.to_list()) == [1, 2, 3]
+}
+
+// An insertion returns a new guest list. Adding an existing member or
+// removing an absent one must leave the number of seats unchanged.
+test "persistent insertion and deletion" {
+  let values = set.from_list([1, 2])
+  assert values.insert(3).contains(3)
+  assert !values.contains(3)
+  assert values.insert(2).size() == 2
+  assert values.delete(1).to_list() == [2]
+  assert values.delete(9).size() == 2
+}
+
+// Overlapping sets separate the shared guests from those in only one input.
+// The subset checks connect the membership operations to their algebra.
+test "set algebra" {
+  let a = set.from_list([1, 2, 3])
+  let b = set.from_list([3, 4])
+  assert list.sort(a.union(b).to_list()) == [1, 2, 3, 4]
+  assert a.intersection(b).to_list() == [3]
+  assert list.sort(a.difference(b).to_list()) == [1, 2]
+  assert a.is_subset(a.union(b))
+  assert !a.is_subset(b)
+  assert a.difference(a).is_empty()
+}
+
+// The empty set has no members to contradict a subset claim. Union and
+// difference keep the other set, while intersection has nothing to return.
+test "empty set laws" {
+  let a = set.from_list([1, 2])
+  let empty = a.difference(a)
+  assert empty.is_subset(a)
+  assert a.union(empty).size() == 2
+  assert a.intersection(empty).is_empty()
+  assert a.difference(empty).size() == 2
+}
+
+// Equality looks at membership rather than arrival order or duplicate input.
+// A set with fewer or different members must still be distinguishable.
+test "set equality ignores order and duplicates" {
+  assert set.from_list([1, 2, 1]).equals(set.from_list([2, 1]))
+  assert !set.from_list([1, 2]).equals(set.from_list([1]))
+  assert !set.from_list([1, 2]).equals(set.from_list([1, 3]))
+}
+
+// The list inside each tuple keeps its own order. Deduplicating whole members
+// must not flatten their structure or rearrange the values nested inside them.
+test "structural set members retain exact tuple and list identity" {
+  let values = set.from_list([#([1, 2], "a"), #([2, 1], "a"), #([1, 2], "a")])
+  assert values.size() == 2
+  assert values.contains(#([1, 2], "a"))
+  assert !values.contains(#([1, 2], "b"))
+  assert values.delete(#([1, 2], "a")).to_list() == [#([2, 1], "a")]
+  assert values.size() == 2
+}
+
+// Difference has a direction: left-only and right-only guests are distinct
+// answers. Disjoint sets provide a separate check of the empty intersection.
+test "set difference is directional and disjoint intersections are empty" {
+  let left = set.from_list([1, 2])
+  let right = set.from_list([2, 3])
+  assert left.difference(right).equals(set.from_list([1]))
+  assert right.difference(left).equals(set.from_list([3]))
+  assert left.intersection(set.from_list([4, 5])).is_empty()
+  assert !left.is_subset(left.difference(right))
+}

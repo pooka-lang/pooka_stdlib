@@ -1,0 +1,99 @@
+//// Read the letters before counting the envelopes.
+////
+//// Strings arrive as UTF-8, but length and slicing speak in Unicode code points.
+//// A combining mark has its own place in that count. These examples also keep
+//// empty fields, replacement boundaries and Unicode case expansion in view.
+////
+//// ```pooka
+//// assert string.length("é") == 2
+//// ```
+
+module string_test
+
+import pooka/string
+
+// The rabbit occupies several UTF-8 bytes but one code point. The accent
+// after e is another code point, even when the two look like one printed letter.
+test "Unicode length counts code points" {
+  assert string.length("Pooka 🐇") == 7
+  assert string.length("é") == 2
+  assert string.length("") == 0
+  assert string.is_empty("")
+  assert !string.is_empty(" ")
+  assert string.to_list("A🐇") == [65, 128007]
+}
+
+// Joining places separators between entries, not around the procession.
+// Zero entries and one entry therefore need no separator at all.
+test "concatenation and joining" {
+  assert string.concat("α", "β") == "αβ"
+  assert string.join(["a", "b", "c"], "|") == "a|b|c"
+  assert string.join([], ",") == ""
+  assert string.join(["only"], ",") == "only"
+}
+
+// Adjacent and trailing separators leave empty fields behind. An empty
+// separator splits code points, while an empty replacement pattern is a no-op.
+test "split and replacement edge cases" {
+  assert string.split("a,,b,", ",") == ["a", "", "b", ""]
+  assert string.split("a🐇", "") == ["a", "🐇"]
+  assert string.split("", "") == []
+  assert string.split("", ",") == [""]
+  assert string.replace("aaaa", "aa", "b") == "bb"
+  assert string.replace("text", "", "x") == "text"
+}
+
+// An empty pattern fits even an empty string. Longer prefixes and suffixes
+// must fail cleanly rather than reading past the smaller value.
+test "contains prefixes and suffixes" {
+  assert string.contains("αβγ", "β")
+  assert string.contains("", "")
+  assert !string.contains("a", "ab")
+  assert string.starts_with("abc", "ab")
+  assert !string.starts_with("a", "ab")
+  assert string.ends_with("abc", "bc")
+  assert !string.ends_with("a", "ba")
+  assert string.starts_with("", "")
+  assert string.ends_with("", "")
+}
+
+// Unicode case conversion can change the number of letters: the sharp s
+// becomes SS. The last trim example uses non-breaking spaces, not ASCII blanks.
+test "Unicode trimming and case conversion" {
+  assert string.trim(" \tα\n") == "α"
+  assert string.trim_start("  a  ") == "a  "
+  assert string.trim_end("  a  ") == "  a"
+  assert string.uppercase("straße") == "STRASSE"
+  assert string.lowercase("ΑΒΓ") == "αβγ"
+  assert string.trim(" a ") == "a"
+}
+
+// Start and length are code-point counts, with negative values clamped.
+// The rabbit and accented letter make byte-based slicing visibly incorrect.
+test "slicing uses clamped code point offsets" {
+  assert string.slice("A🐇éZ", 1, 2) == "🐇é"
+  assert string.slice("abc", -1, 2) == "ab"
+  assert string.slice("abc", 99, 2) == ""
+  assert string.slice("abc", 0, -1) == ""
+  assert string.repeat("α", 3) == "ααα"
+  assert string.repeat("a", -1) == ""
+}
+
+// Replacement text is allowed to resemble the search text. It must not be
+// searched again, or replacing a with aa would never find its way home.
+test "replacement does not rescan inserted text" {
+  assert string.replace("aaa", "a", "aa") == "aaaaaa"
+  assert string.replace("aaaaa", "aa", "b") == "bba"
+  assert string.replace("α🐇α", "α", "") == "🐇"
+  assert string.replace("unchanged", "missing", "x") == "unchanged"
+}
+
+// The combining accent can be sliced on its own under the code-point rule.
+// Rabbit separators also check empty fields on both sides of Unicode text.
+test "Unicode separators and slices retain combining code points" {
+  assert string.split("🐇α🐇🐇", "🐇") == ["", "α", "", ""]
+  assert string.slice("é🐇", 1, 1) == "́"
+  assert string.slice("é🐇", 2, 99) == "🐇"
+  assert string.slice("é🐇", 3, 1) == ""
+  assert string.join(["", "α", ""], "🐇") == "🐇α🐇"
+}
