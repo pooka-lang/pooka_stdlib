@@ -1,0 +1,59 @@
+//// Two clocks, with different errands.
+////
+//// Timestamps describe wall-clock time; monotonic instants measure an interval.
+//// Duration methods preserve units and return new values. Sleeping tests use
+//// lower bounds rather than exact delays: a busy scheduler may arrive late.
+////
+//// ```pooka
+//// assert time.milliseconds(1250).as_seconds() == 1.25
+//// ```
+
+module time_test
+
+import pooka/time
+
+// A duration keeps milliseconds intact when viewed in seconds. Negative
+// durations are useful values even though sleeping for one is rejected elsewhere.
+test "duration units preserve milliseconds" {
+  let duration = time.milliseconds(1250)
+  assert duration.as_milliseconds() == 1250
+  assert duration.as_seconds() == 1.25
+  assert time.seconds(2).as_milliseconds() == 2000
+  assert time.seconds(-2).as_seconds() == -2.0
+}
+
+// Adding or subtracting a duration creates a new timestamp. The original
+// stays put; the wall-clock check uses only a broad lower bound.
+test "timestamp arithmetic is immutable" {
+  let start = time.Timestamp(10000)
+  assert start.add(time.seconds(2)).milliseconds == 12000
+  assert start.subtract(time.milliseconds(500)).milliseconds == 9500
+  assert start.milliseconds == 10000
+  assert time.now().milliseconds > 1700000000000
+}
+
+// A scheduler may wake late, so an exact two-millisecond expectation would
+// be fragile. Reversing the same instants must also reverse the interval sign.
+test "monotonic instants measure elapsed time" {
+  let start = time.monotonic_now()
+  assert time.sleep(time.milliseconds(2)) == Ok(Nil)
+  let end = time.monotonic_now()
+  assert time.duration_between(start, end).as_milliseconds() >= 2
+  assert time.duration_between(end, start).as_milliseconds() <= -2
+}
+
+// A duration can exist outside the sleep API limits. The checked boundary
+// rejects negative and oversized waits, while a zero wait completes successfully.
+test "sleep rejects negative and oversized durations" {
+  assert time.sleep(
+    time.milliseconds(-1)
+  ) == Error(
+    time.TimeError.NegativeDuration
+  )
+  assert time.sleep(
+    time.milliseconds(4294967296)
+  ) == Error(
+    time.TimeError.DurationTooLarge
+  )
+  assert time.sleep(time.milliseconds(0)) == Ok(Nil)
+}
