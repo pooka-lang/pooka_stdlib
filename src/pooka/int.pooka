@@ -15,6 +15,8 @@
 
 module int
 
+import pooka/order.{Order}
+
 /// A int failure carrying the details needed by its caller. Keep this value in
 /// Result until a boundary can explain it.
 class ParseError(text: String)
@@ -240,5 +242,22 @@ parse_base(text: String, base: Int) -> Result(Int, ParseError) {
       Error(_) -> Error(ParseError(text))
     }
     False -> Error(ParseError(text))
+  }
+}
+
+/// Compare integers without losing precision to a floating-point conversion.
+///
+/// ```pooka
+/// import pooka/int
+/// import pooka/order.{Order}
+/// assert int.compare(2, 3) == Order.Less
+/// ```
+compare(left: Int, right: Int) -> Order {
+  match left < right {
+    True -> Order.Less
+    False -> match left > right {
+      True -> Order.Greater
+      False -> Order.Equal
+    }
   }
 }

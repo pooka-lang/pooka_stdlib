@@ -406,3 +406,291 @@ _range(start, end, acc) {
     False -> _range(start + 1, end, prepend(acc, start))
   }
 }
+
+/// Let nested lists leave in a single queue, preserving both levels of order.
+///
+/// ```pooka
+/// import pooka/list
+/// assert list.flatten([[1], [], [2, 3]]) == [1, 2, 3]
+/// ```
+flatten(values: List(List(a))) -> List(a) {
+  values
+  |> fold([], fn(acc, group) {
+    fold(group, acc, fn(items, item) { prepend(items, item) })
+  })
+  |> reverse()
+}
+
+/// Visit each item once, then join the returned lists in their original order.
+///
+/// ```pooka
+/// import pooka/list
+/// assert list.flat_map([1, 2], fn(n) { [n, n] }) == [1, 1, 2, 2]
+/// ```
+flat_map(values: List(a), transform: fn(a) -> List(b)) -> List(b) {
+  values
+  |> fold([], fn(acc, value) {
+    fold(transform(value), acc, fn(items, item) { prepend(items, item) })
+  })
+  |> reverse()
+}
+
+/// Pair the visitors while both queues have someone left. Stop at the shorter list.
+///
+/// ```pooka
+/// import pooka/list
+/// assert list.zip([1, 2], ["owl"]) == [#(1, "owl")]
+/// ```
+zip(left: List(a), right: List(b)) -> List(#(a, b)) {
+  _zip(left, right, [])
+}
+
+// Accumulate backwards so long queues do not leave callers waiting on the stack.
+_zip(left, right, acc) {
+  match #(left, right) {
+    #([x, ..xs], [y, ..ys]) -> _zip(xs, ys, prepend(acc, #(x, y)))
+    _ -> reverse(acc)
+  }
+}
+
+/// Perform an effect for each item from left to right. The empty list returns Nil.
+///
+/// ```pooka
+/// import pooka/list
+/// list.each([1, 2], fn(n) { assert n > 0 })
+/// ```
+each(values: List(a), visit: fn(a) -> Nil) -> Nil {
+  loop value in values {
+    visit(value)
+  }
+}
+
+/// Give matching and non-matching values separate seats, preserving both orders.
+/// The predicate runs once for every item.
+///
+/// ```pooka
+/// import pooka/list
+/// assert list.partition([1, 2, 3], fn(n) { n > 1 }) == #([2, 3], [1])
+/// ```
+partition(values: List(a), keep: fn(a) -> Bool) -> #(List(a), List(a)) {
+  let #(yes, no) = fold(values, #([], []), fn(acc, value) {
+    let #(yes, no) = acc
+    match keep(value) {
+      True -> #(prepend(yes, value), no)
+      False -> #(yes, prepend(no, value))
+    }
+  })
+  #(reverse(yes), reverse(no))
+}
+
+/// Split before the zero-based position. Non-positive counts keep the whole
+/// list on the right; oversized counts leave an empty right side.
+///
+/// ```pooka
+/// import pooka/list
+/// assert list.split([1, 2, 3], 2) == #([1, 2], [3])
+/// ```
+split(values: List(a), count: Int) -> #(List(a), List(a)) {
+  _split(values, count, [])
+}
+
+// Keep the original suffix rather than walking it again.
+_split(values, count, acc) {
+  match count <= 0 {
+    True -> #(reverse(acc), values)
+    False -> match values {
+      [] -> #(reverse(acc), [])
+      [head, ..tail] -> _split(tail, count - 1, prepend(acc, head))
+    }
+  }
+}
+
+/// Keep the longest matching prefix. Stop asking the predicate at the first
+/// False; the remaining suffix is returned unchanged.
+///
+/// ```pooka
+/// import pooka/list
+/// assert list.split_while([1, 2, 0, 3], fn(n) { n > 0 }) == #([1, 2], [0, 3])
+/// ```
+split_while(values: List(a), keep: fn(a) -> Bool) -> #(List(a), List(a)) {
+  _split_while(values, keep, [])
+}
+
+_split_while(values, keep, acc) {
+  match values {
+    [] -> #(reverse(acc), [])
+    [head, ..tail] -> match keep(head) {
+      True -> _split_while(tail, keep, prepend(acc, head))
+      False -> #(reverse(acc), values)
+    }
+  }
+}
+
+/// Return the first Some produced by the callback. Later items are not visited.
+///
+/// ```pooka
+/// import pooka/list
+/// assert list.find_map([1, 2], fn(n) { match n { 2 -> Some("owl") _ -> None } }) == Some("owl")
+/// ```
+find_map(values: List(a), find: fn(a) -> Option(b)) -> Option(b) {
+  match values {
+    [] -> None
+    [head, ..tail] -> match find(head) {
+      Some(value) -> Some(value)
+      None -> find_map(tail, find)
+    }
+  }
+}
+
+/// Count the matching items, asking the predicate once for each one.
+///
+/// ```pooka
+/// import pooka/list
+/// assert list.count([1, 2, 3], fn(n) { n > 1 }) == 2
+/// ```
+count(values: List(a), keep: fn(a) -> Bool) -> Int {
+  fold(values, 0, fn(total, value) {
+    match keep(value) {
+      True -> total + 1
+      False -> total
+    }
+  })
+}
+
+/// Make a list containing count copies of value. Non-positive counts return [].
+///
+/// ```pooka
+/// import pooka/list
+/// assert list.repeat("owl", 2) == ["owl", "owl"]
+/// ```
+repeat(value: a, count: Int) -> List(a) {
+  _repeat(value, count, [])
+}
+
+_repeat(value, count, acc) {
+  match count <= 0 {
+    True -> acc
+    False -> _repeat(value, count - 1, prepend(acc, value))
+  }
+}
+
+/// Map from left to right with a zero-based index. The callback receives the
+/// value first and its index second.
+///
+/// ```pooka
+/// import pooka/list
+/// assert list.index_map([10, 20], fn(n, index) { n + index }) == [10, 21]
+/// ```
+index_map(values: List(a), transform: fn(a, Int) -> b) -> List(b) {
+  _index_map(values, transform, 0, [])
+}
+
+_index_map(values, transform, index, acc) {
+  match values {
+    [] -> reverse(acc)
+    [head, ..tail] -> _index_map(
+      tail,
+      transform,
+      index + 1,
+      prepend(acc, transform(head, index))
+    )
+  }
+}
+
+/// Fold with the accumulator, value and zero-based index, in that order.
+///
+/// ```pooka
+/// import pooka/list
+/// assert list.index_fold([10, 20], 0, fn(acc, n, index) { acc + n + index }) == 31
+/// ```
+index_fold(values: List(a), initial: b, step: fn(b, a, Int) -> b) -> b {
+  _index_fold(values, initial, step, 0)
+}
+
+_index_fold(values, acc, step, index) {
+  match values {
+    [] -> acc
+    [head, ..tail] -> _index_fold(tail, step(acc, head, index), step, index + 1)
+  }
+}
+
+/// Look up the first pair with this key. Missing keys return None.
+///
+/// ```pooka
+/// import pooka/list
+/// assert list.key_find([#("owl", 2), #("owl", 3)], "owl") == Some(2)
+/// ```
+key_find(pairs: List(#(k, v)), key: k) -> Option(v) {
+  match pairs {
+    [] -> None
+    [pair, ..tail] -> {
+      let #(candidate, value) = pair
+      match candidate == key {
+        True -> Some(value)
+        False -> key_find(tail, key)
+      }
+    }
+  }
+}
+
+/// Map fallible work in order. The first Error returns immediately; remaining
+/// callbacks are not called. An empty list succeeds with Ok([]).
+///
+/// ```pooka
+/// import pooka/list
+/// assert list.try_map([1, 2], fn(n) { Ok(n + 1) }) == Ok([2, 3])
+/// ```
+try_map(values: List(a), transform: fn(a) -> Result(b, e)) -> Result(List(b), e) {
+  _try_map(values, transform, [])
+}
+
+_try_map(values: List(a), transform: fn(a) -> Result(b, e), acc: List(b)) -> Result(
+  List(b),
+  e
+) {
+  match values {
+    [] -> Ok(reverse(acc))
+    [head, ..tail] -> {
+      let value = transform(head)?
+      _try_map(tail, transform, prepend(acc, value))
+    }
+  }
+}
+
+/// Carry a fallible accumulator from left to right. The first Error stops the
+/// walk; an empty list returns Ok(initial).
+///
+/// ```pooka
+/// import pooka/list
+/// assert list.try_fold([1, 2], 0, fn(acc, n) { Ok(acc + n) }) == Ok(3)
+/// ```
+try_fold(values: List(a), initial: b, step: fn(b, a) -> Result(b, e)) -> Result(
+  b,
+  e
+) {
+  match values {
+    [] -> Ok(initial)
+    [head, ..tail] -> {
+      let next = step(initial, head)?
+      try_fold(tail, next, step)
+    }
+  }
+}
+
+/// Perform fallible effects in order. Stop at the first Error; the empty list
+/// succeeds with Ok(Nil).
+///
+/// ```pooka
+/// import pooka/list
+/// assert list.try_each([1, 2], fn(n) { assert n > 0
+///   Ok(Nil) }) == Ok(Nil)
+/// ```
+try_each(values: List(a), visit: fn(a) -> Result(Nil, e)) -> Result(Nil, e) {
+  match values {
+    [] -> Ok(Nil)
+    [head, ..tail] -> {
+      let _ = visit(head)?
+      try_each(tail, visit)
+    }
+  }
+}

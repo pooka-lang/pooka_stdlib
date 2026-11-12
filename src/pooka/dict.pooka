@@ -62,6 +62,33 @@ class Dict(k, v) {
     Dict(_storage.change(key, None))
   }
 
+  /// Read a key or return the supplied fallback. An existing value is kept.
+  ///
+  /// ```pooka
+  /// import pooka/dict
+  ///
+  /// assert dict.empty().get_or("owl", 0) == 0
+  /// ```
+  get_or(key: k, fallback: v) -> v {
+    match _storage.get(key) {
+      Some(value) -> value
+      None -> fallback
+    }
+  }
+
+  /// Let the callback see the previous value, or None for a new key. Store its
+  /// result in a new dictionary, leaving the earlier dictionary untouched.
+  /// The callback is called once, whether or not the key already exists.
+  ///
+  /// ```pooka
+  /// import pooka/dict
+  ///
+  /// assert dict.empty().upsert("owl", fn(_) { 1 }).get("owl") == Some(1)
+  /// ```
+  upsert(key: k, change: fn(Option(v)) -> v) -> Dict(k, v) {
+    insert(key, change(_storage.get(key)))
+  }
+
   /// Check membership without exposing the stored value.
   ///
   /// ```pooka
