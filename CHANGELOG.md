@@ -2,7 +2,7 @@
 
 All notable changes to the Pooka standard library are documented in this file.
 
-## Unreleased
+## 0.2.0
 
 ### Performance
 

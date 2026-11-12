@@ -1,5 +1,5 @@
 name = "pooka_stdlib"
-version = "0.1.0"
+version = "0.2.0"
 description = "The Pooka standard library"
 licences = ["Apache-2.0"]
 repository = { type = "github", user = "pooka-lang", repo = "pooka_stdlib" }
