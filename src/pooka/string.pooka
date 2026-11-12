@@ -240,3 +240,51 @@ repeat(text: String, count: Int) -> String {
 to_list(text: String) -> List(Int) {
   _Text.string_points(text)
 }
+
+/// Split at the first separator, preserving the rest of the text. Return None
+/// when absent. The empty separator splits before the first code point.
+///
+/// ```pooka
+/// import pooka/string
+/// assert string.split_once("a:b:c", ":") == Some(#("a", "b:c"))
+/// ```
+split_once(text: String, separator: String) -> Option(#(String, String)) {
+  match separator {
+    "" -> Some(#("", text))
+    _ -> match split(text, separator) {
+      [] -> None
+      [first, ..rest] -> match rest {
+        [] -> None
+        _ -> Some(#(first, join(rest, separator)))
+      }
+    }
+  }
+}
+
+/// Drop count Unicode code points from the start. Non-positive counts keep
+/// the original text; dropping past its end returns an empty string.
+///
+/// ```pooka
+/// import pooka/string
+/// assert string.drop_start("α🐇oak", 2) == "oak"
+/// ```
+drop_start(text: String, count: Int) -> String {
+  match count <= 0 {
+    True -> text
+    False -> slice(text, count, length(text))
+  }
+}
+
+/// Drop count Unicode code points from the end, not UTF-8 bytes. Non-positive
+/// counts leave the text alone; an oversized count removes everything.
+///
+/// ```pooka
+/// import pooka/string
+/// assert string.drop_end("oakα🐇", 2) == "oak"
+/// ```
+drop_end(text: String, count: Int) -> String {
+  match count <= 0 {
+    True -> text
+    False -> slice(text, 0, length(text) - count)
+  }
+}

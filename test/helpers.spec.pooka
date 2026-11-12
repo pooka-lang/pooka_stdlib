@@ -1,0 +1,222 @@
+//// Keep the new shelves in order, including the empty ones.
+////
+//// Assertions describe public behaviour. A small actor records callback order
+//// where an ordinary return value cannot show whether work ran twice.
+
+module helpers_test
+
+import pooka/dict
+import pooka/int
+import pooka/list
+import pooka/order.{Order}
+import pooka/string
+
+actor Visits {
+  var entries: List(Int) = []
+
+  be note(value: Int) {
+    entries = list.prepend(entries, value)
+  }
+
+  read() -> List(Int) {
+    list.reverse(entries)
+  }
+}
+
+test "flatten and flat_map preserve both levels of order" {
+  assert list.flatten([[1, 2], [], [3], []]) == [1, 2, 3]
+  assert list.flatten([]) == []
+  let visits = Visits()
+  assert list.flat_map([1, 2, 3], fn(n) {
+    visits.note(n)
+    match n {
+      2 -> []
+      _ -> [n, n]
+    }
+  }) == [1, 1, 3, 3]
+  assert visits.read() == [1, 2, 3]
+  assert list.flat_map([], fn(_) { panic as "empty list called its callback" }) == []
+}
+
+test "zip stops when either queue ends" {
+  assert list.zip([1, 2], ["a", "b", "c"]) == [#(1, "a"), #(2, "b")]
+  assert list.zip([1, 2, 3], ["a"]) == [#(1, "a")]
+  assert list.zip([], [1]) == []
+  assert list.zip([1], []) == []
+}
+
+test "each visits once in order and accepts empty input" {
+  let visits = Visits()
+  assert list.each([3, 1, 2], fn(n) { visits.note(n) }) == Nil
+  assert visits.read() == [3, 1, 2]
+  assert list.each([], fn(_) { panic as "empty list called its callback" }) == Nil
+}
+
+test "partition is stable and asks once per item" {
+  let visits = Visits()
+  assert list.partition([3, 1, 2], fn(n) {
+    visits.note(n)
+    n > 1
+  }) == #([3, 2], [1])
+  assert visits.read() == [3, 1, 2]
+  assert list.partition([], fn(_) {
+    panic as "empty list called its predicate"
+  }) == #([], [])
+}
+
+test "split clamps counts and preserves every element" {
+  assert list.split([1, 2, 3], 2) == #([1, 2], [3])
+  assert list.split([1, 2], 0) == #([], [1, 2])
+  assert list.split([1, 2], -1) == #([], [1, 2])
+  assert list.split([1, 2], 20) == #([1, 2], [])
+  assert list.split([], 2) == #([], [])
+  let #(left, right) = list.split(list.range(0, 100), 37)
+  assert list.concat(left, right) == list.range(0, 100)
+}
+
+test "split_while stops asking at the first false answer" {
+  assert list.split_while([1, 2, 3], fn(n) {
+    match n {
+      3 -> panic as "walked beyond the boundary"
+      _ -> n < 2
+    }
+  }) == #([1], [2, 3])
+  assert list.split_while([1, 2], fn(_) { True }) == #([1, 2], [])
+  assert list.split_while([1, 2], fn(_) { False }) == #([], [1, 2])
+  assert list.split_while([], fn(_) { panic as "empty predicate" }) == #([], [])
+}
+
+test "find_map returns the first transformed success" {
+  assert list.find_map([1, 2, 3], fn(n) {
+    match n {
+      1 -> None
+      2 -> Some("found")
+      _ -> panic as "visited after success"
+    }
+  }) == Some("found")
+  assert list.find_map([1, 2], fn(_) { None }) == None
+  assert list.find_map([], fn(_) { panic as "empty search" }) == None
+}
+
+test "count repeat and indexed traversals handle their boundaries" {
+  assert list.count([1, 2, 3], fn(n) { n > 1 }) == 2
+  assert list.count([], fn(_) { panic as "empty count" }) == 0
+  assert list.repeat("owl", 3) == ["owl", "owl", "owl"]
+  assert list.repeat(1, 0) == []
+  assert list.repeat(1, -3) == []
+  assert list.index_map([10, 20], fn(n, index) { #(n, index) }) == [
+    #(10, 0),
+    #(20, 1)
+  ]
+  assert list.index_map([], fn(_, _) { panic as "empty index map" }) == []
+  assert list.index_fold([10, 20], "", fn(acc, n, index) {
+    acc + int.to_string(index) + ":" + int.to_string(n) + ";"
+  }) == "0:10;1:20;"
+  assert list.index_fold([], 42, fn(_, _, _) { panic as "empty index fold" }) == 42
+}
+
+test "key_find keeps the first matching pair and distinguishes absence" {
+  assert list.key_find([#("owl", 0), #("owl", 3)], "owl") == Some(0)
+  assert list.key_find([#("owl", 0)], "fox") == None
+  assert list.key_find([], "owl") == None
+}
+
+test "try_map preserves result order and the first error" {
+  assert list.try_map([1, 2], fn(n) { Ok(n * 2) }) == Ok([2, 4])
+  assert list.try_map([1, 2, 3], fn(n) {
+    match n {
+      1 -> Ok(n)
+      2 -> Error(#(n, "stop"))
+      _ -> panic as "visited after error"
+    }
+  }) == Error(#(2, "stop"))
+  assert list.try_map([], fn(_) { panic as "empty try map" }) == Ok([])
+}
+
+test "try_fold returns the accumulator reached before failure" {
+  assert list.try_fold([1, 2, 3], 0, fn(acc, n) { Ok(acc + n) }) == Ok(6)
+  assert list.try_fold([1, 2, 3], 0, fn(acc, n) {
+    match n {
+      1 -> Ok(acc + n)
+      2 -> Error(acc)
+      _ -> panic as "visited after error"
+    }
+  }) == Error(1)
+  assert list.try_fold([], 42, fn(_, _) { panic as "empty try fold" }) == Ok(42)
+}
+
+test "try_each stops effects at the first error" {
+  let visits = Visits()
+  assert list.try_each([1, 2, 3], fn(n) {
+    visits.note(n)
+    match n {
+      2 -> Error("stop")
+      _ -> Ok(Nil)
+    }
+  }) == Error("stop")
+  assert visits.read() == [1, 2]
+  assert list.try_each([1, 2], fn(_) { Ok(Nil) }) == Ok(Nil)
+  assert list.try_each([], fn(_) { panic as "empty try each" }) == Ok(Nil)
+}
+
+test "fallible and indexed traversals work on longer lists" {
+  let values = list.range(0, 3000)
+  assert list.try_map(values, fn(n) { Ok(n) }) == Ok(values)
+  assert list.length(list.index_map(values, fn(n, index) { n + index })) == 3000
+  assert list.length(list.repeat(True, 3000)) == 3000
+}
+
+test "dictionary upsert observes presence once and leaves the original intact" {
+  let first = dict.from_list([#("owl", 2)])
+  let visits = Visits()
+  let second = first.upsert("owl", fn(old) {
+    visits.note(1)
+    let assert Some(n) = old
+    n + 1
+  })
+  assert first.get("owl") == Some(2)
+  assert second.get("owl") == Some(3)
+  assert visits.read() == [1]
+  let third = first.upsert("fox", fn(old) {
+    assert old == None
+    4
+  })
+  assert third.get("fox") == Some(4)
+  assert first.get("fox") == None
+  assert dict.empty().upsert("new", fn(_) { 1 }).get_or("new", 0) == 1
+  assert first.get_or("owl", 99) == 2
+  assert first.get_or("fox", 99) == 99
+}
+
+test "split_once preserves the rest including repeated separators" {
+  assert string.split_once("a:b:c", ":") == Some(#("a", "b:c"))
+  assert string.split_once(":a:", ":") == Some(#("", "a:"))
+  assert string.split_once("aaa", "aa") == Some(#("", "a"))
+  assert string.split_once("α🐇β🐇", "🐇") == Some(#("α", "β🐇"))
+  assert string.split_once("owl", ":") == None
+  assert string.split_once("", ":") == None
+  assert string.split_once("owl", "") == Some(#("", "owl"))
+  assert string.split_once("", "") == Some(#("", ""))
+}
+
+test "string dropping counts code points rather than bytes" {
+  assert string.drop_start("α🐇oak", 2) == "oak"
+  assert string.drop_end("oakα🐇", 2) == "oak"
+  assert string.drop_start("e\u{301}x", 1) == "\u{301}x"
+  assert string.drop_end("e\u{301}", 1) == "e"
+  assert string.drop_start("owl", -1) == "owl"
+  assert string.drop_end("owl", 0) == "owl"
+  assert string.drop_start("owl", 10) == ""
+  assert string.drop_end("owl", 10) == ""
+  assert string.drop_start("", 1) == ""
+  assert string.drop_end("", 1) == ""
+}
+
+test "integer comparison retains precision for large values" {
+  assert int.compare(1, 2) == Order.Less
+  assert int.compare(2, 1) == Order.Greater
+  assert int.compare(-2, -2) == Order.Equal
+  assert int.compare(-3, -2) == Order.Less
+  assert int.compare(100000000000000000001, 100000000000000000000) == Order.Greater
+  assert list.sort_by([3, 1, 2], int.compare) == [1, 2, 3]
+}
