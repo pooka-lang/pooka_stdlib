@@ -27,7 +27,6 @@
 
 -export([
     cons/2,
-    compare/2,
     quotient/2,
     dict_new/1,
     dict_from_list/2,
@@ -110,13 +109,6 @@
 %% cons([2, 3], 1). % [1,2,3]
 %% ```
 cons(Values, Value) -> [Value | Values].
-
-%% Return a signed comparison under Erlang term ordering; exact equality is checked before
-%% ordered comparisons.
-compare(A, B) when A =:= B -> 0;
-compare(A, B) when A < B -> -1;
-compare(A, B) when A > B -> 1;
-compare(_, _) -> 0.
 
 %% Use integer div, truncating toward zero. The Pooka wrapper checks zero divisors where a
 %% Result is promised.

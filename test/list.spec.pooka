@@ -181,3 +181,82 @@ test "fold is left associative and filter map retains encounter order" {
     }
   }) == [50, 70, 10]
 }
+
+// Native walks must keep the same answers when the pockets hold more than ints.
+test "native list walks preserve empty singleton and generic values" {
+  assert list.length([]) == 0
+  assert list.length([Some("owl")]) == 1
+  assert list.reverse([Some("owl"), None, Some("fox")]) == [
+    Some("fox"),
+    None,
+    Some("owl")
+  ]
+  assert list.reverse([[1, 2], [], [3]]) == [[3], [], [1, 2]]
+  assert list.reverse(["owl"]) == ["owl"]
+}
+
+test "concatenation and prepend leave their inputs intact" {
+  let left = [#("owl", 1), #("fox", 2)]
+  let right = [#("hare", 3)]
+  assert list.concat(left, right) == [#("owl", 1), #("fox", 2), #("hare", 3)]
+  assert list.concat(left, []) == left
+  assert list.concat([], right) == right
+  assert list.concat([], []) == []
+  assert list.prepend([], Some(1)) == [Some(1)]
+  assert list.prepend(right, #("owl", 0)) == [#("owl", 0), #("hare", 3)]
+  assert left == [#("owl", 1), #("fox", 2)]
+  assert right == [#("hare", 3)]
+}
+
+test "native sort keeps duplicates and follows term ordering" {
+  assert list.sort([1]) == [1]
+  assert list.sort([2, 2, 1, 2, 1]) == [1, 1, 2, 2, 2]
+  assert list.sort([3.5, -1.5, 0.0, 3.5]) == [-1.5, 0.0, 3.5, 3.5]
+  assert list.sort(["owl", "fox", "hare", "fox"]) == [
+    "fox",
+    "fox",
+    "hare",
+    "owl"
+  ]
+  assert list.sort([#(2, "a"), #(1, "z"), #(1, "a")]) == [
+    #(1, "a"),
+    #(1, "z"),
+    #(2, "a")
+  ]
+  assert list.sort([[2], [], [1, 2], [1]]) == [[], [1], [1, 2], [2]]
+}
+
+// Many equal keys cross merge boundaries. Their original labels must stay put.
+test "custom sort retains equal key order across longer runs" {
+  let values = list.map(list.range(0, 1000), fn(n) { #(n % 5, n) })
+  let compare = fn(a, b) {
+    let #(left, _) = a
+    let #(right, _) = b
+    order.from_int(left - right)
+  }
+  let sorted = list.sort_by(values, compare)
+  let expected = list.flat_map(list.range(0, 5), fn(key) {
+    list.filter(values, fn(pair) {
+      let #(value, _) = pair
+      value == key
+    })
+  })
+  assert sorted == expected
+  assert list.sort_by(values, fn(_, _) { Order.Equal }) == values
+  assert list.sort_by([], fn(_, _) {
+    panic as "empty sort called its comparator"
+  }) == []
+  assert list.sort_by([1], fn(_, _) {
+    panic as "singleton sort called its comparator"
+  }) == [1]
+}
+
+test "long native list walks preserve every value" {
+  let values = list.range(0, 50_000)
+  let reversed = list.reverse(values)
+  assert list.length(values) == 50_000
+  assert list.first(reversed) == Some(49_999)
+  assert list.last(reversed) == Some(0)
+  assert list.reverse(reversed) == values
+  assert list.concat(values, [50_000]) == list.range(0, 50_001)
+}

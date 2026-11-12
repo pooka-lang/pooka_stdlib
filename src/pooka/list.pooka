@@ -20,9 +20,26 @@ import pooka/order.{Order}
 external _Primitives from erlang "pooka_stdlib_ffi" {
   cons(values: List(a), value: a) -> List(a)
 
-  compare(left: a, right: a) -> Int
-
   quotient(a: Int, b: Int) -> Int
+}
+
+// These calls walk the list inside OTP, without a Pooka closure at every cell.
+// reverse/2 also lets a merge attach its untouched tail in the same pass.
+// https://www.erlang.org/doc/apps/stdlib/lists.html#reverse/2
+external _Lists from erlang "lists" {
+  reverse(values: List(a)) -> List(a)
+
+  append(left: List(a), right: List(a)) -> List(a)
+
+  sort(values: List(a)) -> List(a)
+}
+
+external _ListTail from erlang "lists" {
+  reverse(values: List(a), tail: List(a)) -> List(a)
+}
+
+external _Erlang from erlang "erlang" {
+  length(values: List(a)) -> Int
 }
 
 /// Return an empty list, ready to welcome elements of one inferred type.
@@ -58,7 +75,7 @@ is_empty(values: List(a)) -> Bool {
 /// assert list.length([1, 2, 3]) == 3
 /// ```
 length(values: List(a)) -> Int {
-  fold(values, 0, fn(n, _) { n + 1 })
+  _Erlang.length(values)
 }
 
 /// Open the first envelope, or return None for an empty list.
@@ -140,12 +157,10 @@ append(values: List(a), value: a) -> List(a) {
 /// assert list.concat([1, 2], [3]) == [1, 2, 3]
 /// ```
 concat(left: List(a), right: List(a)) -> List(a) {
-  left
-  |> reverse()
-  |> fold(right, fn(acc, x) { prepend(acc, x) })
+  _Lists.append(left, right)
 }
 
-/// Turn the list around using a tail-recursive fold.
+/// Turn the list around in one pass through OTP, without an element callback.
 ///
 /// ```pooka
 /// import pooka/list
@@ -153,7 +168,7 @@ concat(left: List(a), right: List(a)) -> List(a) {
 /// assert list.reverse([1, 2, 3]) == [3, 2, 1]
 /// ```
 reverse(values: List(a)) -> List(a) {
-  fold(values, [], fn(acc, x) { prepend(acc, x) })
+  _Lists.reverse(values)
 }
 
 /// Visit each element once and keep the callback results in their original
@@ -326,7 +341,7 @@ drop(values: List(a), count: Int) -> List(a) {
 /// assert list.sort([3, 1, 2]) == [1, 2, 3]
 /// ```
 sort(values: List(a)) -> List(a) {
-  sort_by(values, fn(a, b) { order.from_int(_Primitives.compare(a, b)) })
+  _Lists.sort(values)
 }
 
 /// Stable-sort using a callback returning Order; equal elements retain their
@@ -358,8 +373,8 @@ sort_by(values: List(a), compare: fn(a, a) -> Order) -> List(a) {
 /// element, preserving sort stability.
 _merge(left, right, compare, acc) {
   match #(left, right) {
-    #([], _) -> concat(reverse(acc), right)
-    #(_, []) -> concat(reverse(acc), left)
+    #([], _) -> _ListTail.reverse(acc, right)
+    #(_, []) -> _ListTail.reverse(acc, left)
     #([x, ..xs], [y, ..ys]) -> match compare(x, y) {
       Order.Greater -> _merge(left, ys, compare, prepend(acc, y))
       _ -> _merge(xs, right, compare, prepend(acc, x))

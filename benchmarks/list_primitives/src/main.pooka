@@ -1,0 +1,81 @@
+module main
+
+import pooka/list
+import pooka/time
+import pooka/int
+
+external _Lists from erlang "lists" {
+  reverse(values: List(Int)) -> List(Int)
+
+  sort(values: List(Int)) -> List(Int)
+}
+
+external _Erlang from erlang "erlang" {
+  length(values: List(Int)) -> Int
+}
+
+measure(name: String, run: fn() -> a, check: fn(a) -> Bool) {
+  assert check(run())
+  let samples = list.map(list.range(0, 5), fn(_) {
+    let start = time.monotonic_now()
+    let result = run()
+    let elapsed = time.duration_between(start, time.monotonic_now())
+    assert check(result)
+    elapsed.as_milliseconds()
+  })
+  echo #(name, samples)
+}
+
+build(count: Int, acc: List(Int)) -> List(Int) {
+  match count {
+    0 -> acc
+    _ -> build(count - 1, list.prepend(acc, count))
+  }
+}
+
+main() {
+  let values = list.range(0, 1_000_000)
+  let reversed = _Lists.reverse(values)
+  let unordered = list.map(list.range(0, 50_000), fn(n) { (n * 7919) % 50_000 })
+  let sorted = _Lists.sort(unordered)
+  measure(
+    "reverse pooka ms",
+    fn() { list.reverse(values) },
+    fn(xs) { xs == reversed }
+  )
+  measure(
+    "reverse erlang ms",
+    fn() { _Lists.reverse(values) },
+    fn(xs) { xs == reversed }
+  )
+  measure(
+    "length pooka ms",
+    fn() { list.length(values) },
+    fn(n) { n == 1_000_000 }
+  )
+  measure(
+    "length erlang ms",
+    fn() { _Erlang.length(values) },
+    fn(n) { n == 1_000_000 }
+  )
+  measure(
+    "prepend million ms",
+    fn() { build(1_000_000, []) },
+    fn(xs) { xs == list.range(1, 1_000_001) }
+  )
+  measure(
+    "sort pooka ms",
+    fn() { list.sort(unordered) },
+    fn(xs) { xs == sorted }
+  )
+  measure(
+    "sort_by pooka ms",
+    fn() { list.sort_by(unordered, int.compare) },
+    fn(xs) { xs == sorted }
+  )
+  measure(
+    "sort erlang ms",
+    fn() { _Lists.sort(unordered) },
+    fn(xs) { xs == sorted }
+  )
+}
