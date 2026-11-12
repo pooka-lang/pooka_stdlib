@@ -4,6 +4,10 @@ All notable changes to the Pooka standard library are documented in this file.
 
 ## Unreleased
 
+### Performance
+
+- Use OTP fast paths for list length, reversal, concatenation and default sorting; join custom-sort runs without rebuilding their accumulated prefix twice (#1).
+
 ### Added
 
 - List traversal, splitting, indexed callbacks, pair lookup and short-circuiting Result helpers (#2).
