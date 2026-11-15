@@ -80,57 +80,138 @@ class Dynamic {
   }
 
   /// Read int only when the captured runtime shape permits it.
+  ///
+  /// ```pooka
+  /// import pooka/dynamic
+  ///
+  /// assert dynamic.from(42).as_int() == Some(42)
+  /// assert dynamic.from(42.0).as_int() == None
+  /// ```
   as_int() -> Option(Int) {
     _int()
   }
 
   /// Read float only when the captured runtime shape permits it.
+  ///
+  /// ```pooka
+  /// import pooka/dynamic
+  ///
+  /// assert dynamic.from(2.5).as_float() == Some(2.5)
+  /// assert dynamic.from(2).as_float() == None
+  /// ```
   as_float() -> Option(Float) {
     _float()
   }
 
   /// Read string only when the captured runtime shape permits it.
+  ///
+  /// ```pooka
+  /// import pooka/dynamic
+  ///
+  /// assert dynamic.from("owl").as_string() == Some("owl")
+  /// assert dynamic.from(<<255>>).as_string() == None
+  /// ```
   as_string() -> Option(String) {
     _string()
   }
 
   /// Read bool only when the captured runtime shape permits it.
+  ///
+  /// ```pooka
+  /// import pooka/dynamic
+  ///
+  /// assert dynamic.from(True).as_bool() == Some(True)
+  /// assert dynamic.from(1).as_bool() == None
+  /// ```
   as_bool() -> Option(Bool) {
     _bool()
   }
 
   /// Read bits only when the captured runtime shape permits it.
+  ///
+  /// ```pooka
+  /// import pooka/dynamic
+  ///
+  /// assert dynamic.from(<<1:1>>).as_bits() == Some(<<1:1>>)
+  /// ```
   as_bits() -> Option(BitArray) {
     _bits()
   }
 
   /// Read list only when the captured runtime shape permits it.
+  ///
+  /// ```pooka
+  /// import pooka/dynamic
+  ///
+  /// let assert Some([first, second]) = dynamic.from([1, 2]).as_list()
+  /// assert first.as_int() == Some(1)
+  /// assert second.as_int() == Some(2)
+  /// ```
   as_list() -> Option(List(Dynamic)) {
     _list()
   }
 
   /// Read field only when the captured runtime shape permits it.
+  ///
+  /// ```pooka
+  /// import pooka/dynamic
+  ///
+  /// let value = dynamic.from_pairs([#("age", 7)])
+  /// let assert Some(age) = value.field("age")
+  /// assert age.as_int() == Some(7)
+  /// assert value.field("missing") == None
+  /// ```
   field(name: String) -> Option(Dynamic) {
     _field(name)
   }
 
   /// Read element only when the captured runtime shape permits it.
+  ///
+  /// ```pooka
+  /// import pooka/dynamic
+  ///
+  /// let assert Some(first) = dynamic.from(#(7, "owl")).element(0)
+  /// assert first.as_int() == Some(7)
+  /// assert dynamic.from([7]).element(0) == None
+  /// ```
   element(index: Int) -> Option(Dynamic) {
     _element(index)
   }
 
   /// Read kind only when the captured runtime shape permits it.
+  ///
+  /// ```pooka
+  /// import pooka/dynamic
+  ///
+  /// assert dynamic.from(7).kind() == "Int"
+  /// assert dynamic.from("7").kind() == "String"
+  /// ```
   kind() -> String {
     _kind()
   }
 }
 
 /// Capture any value through checked readers. It gains no new static claims.
+///
+/// ```pooka
+/// import pooka/dynamic
+///
+/// assert dynamic.from("42").as_int() == None
+/// assert dynamic.from(42).as_int() == Some(42)
+/// ```
 from(value: a) -> Dynamic {
   _Values.dynamic_wrap(value, Dynamic)
 }
 
 /// Construct a foreign-style binary-key map for decoding. Last duplicate wins.
+///
+/// ```pooka
+/// import pooka/dynamic
+///
+/// let value = dynamic.from_pairs([#("age", 1), #("age", 7)])
+/// let assert Some(age) = value.field("age")
+/// assert age.as_int() == Some(7)
+/// ```
 from_pairs(pairs: List(#(String, a))) -> Dynamic {
   _Values.dynamic_from_pairs(pairs, Dynamic)
 }

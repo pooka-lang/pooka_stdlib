@@ -1,10 +1,10 @@
 name = "pooka_stdlib"
-version = "0.3.0"
+version = "0.3.1"
 description = "The Pooka standard library"
 licences = ["Apache-2.0"]
-repository = { type = "github", user = "pooka-lang", repo = "pooka_stdlib" }
+repository = { type = "github", user = "pooka-lang", repo = "stdlib" }
 links = [
-  { title = "Issues", href = "https://github.com/pooka-lang/pooka_stdlib/issues" },
+  { title = "Issues", href = "https://github.com/pooka-lang/stdlib/issues" },
   { title = "Compiler", href = "https://github.com/pooka-lang/pooka" },
 ]
 

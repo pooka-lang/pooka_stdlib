@@ -24,11 +24,23 @@ class _Leaf(value: String) is StringTree
 class _Branch(left: StringTree, right: StringTree) is StringTree
 
 /// Start without any chunks.
+///
+/// ```pooka
+/// import pooka/string_tree
+///
+/// assert string_tree.is_empty(string_tree.new())
+/// ```
 new() -> StringTree {
   _Empty()
 }
 
 /// Keep a chunk without copying its contents.
+///
+/// ```pooka
+/// import pooka/string_tree
+///
+/// assert string_tree.to_string(string_tree.from_string("oak")) == "oak"
+/// ```
 from_string(value: String) -> StringTree {
   _Leaf(value)
 }
@@ -43,31 +55,71 @@ append(tree: StringTree, value: String) -> StringTree {
 }
 
 /// Attach another tree without walking either side.
+///
+/// ```pooka
+/// import pooka/string_tree
+///
+/// let left = string_tree.from_string("oak")
+/// let right = string_tree.from_string(" and ash")
+/// assert string_tree.to_string(string_tree.append_tree(left, right)) == "oak and ash"
+/// ```
 append_tree(left: StringTree, right: StringTree) -> StringTree {
   _Branch(left, right)
 }
 
 /// Place one chunk before the earlier tree.
+///
+/// ```pooka
+/// import pooka/string_tree
+///
+/// let tree = string_tree.from_string("owl")
+/// assert string_tree.to_string(string_tree.prepend(tree, "little ")) == "little owl"
+/// ```
 prepend(tree: StringTree, value: String) -> StringTree {
   append_tree(from_string(value), tree)
 }
 
 /// Join trees in input order without rendering their chunks.
+///
+/// ```pooka
+/// import pooka/string_tree
+///
+/// let trees = [string_tree.from_string("a"), string_tree.from_string("b")]
+/// assert string_tree.to_string(string_tree.concat(trees)) == "ab"
+/// ```
 concat(trees: List(StringTree)) -> StringTree {
   list.fold(trees, new(), append_tree)
 }
 
 /// Keep each supplied chunk as a leaf.
+///
+/// ```pooka
+/// import pooka/string_tree
+///
+/// assert string_tree.to_string(string_tree.from_strings(["a", "b"])) == "ab"
+/// ```
 from_strings(values: List(String)) -> StringTree {
   list.fold(values, new(), append)
 }
 
 /// Render once, preserving every chunk's order.
+///
+/// ```pooka
+/// import pooka/string_tree
+///
+/// assert string_tree.to_string(string_tree.from_strings(["oak", "leaf"])) == "oakleaf"
+/// ```
 to_string(tree: StringTree) -> String {
   string.join(_chunks([tree], []), "")
 }
 
 /// Count encoded bytes without joining the chunks.
+///
+/// ```pooka
+/// import pooka/string_tree
+///
+/// assert string_tree.byte_size(string_tree.from_string("é")) == 2
+/// ```
 byte_size(tree: StringTree) -> Int {
   list.fold(_chunks([tree], []), 0, fn(acc, value) {
     acc + string.byte_size(value)
@@ -75,6 +127,12 @@ byte_size(tree: StringTree) -> Int {
 }
 
 /// Ask whether rendering would produce an empty value.
+///
+/// ```pooka
+/// import pooka/string_tree
+///
+/// assert string_tree.is_empty(string_tree.from_string(""))
+/// ```
 is_empty(tree: StringTree) -> Bool {
   byte_size(tree) == 0
 }

@@ -2,6 +2,13 @@
 
 All notable changes to the Pooka standard library are documented in this file.
 
+## 0.3.1
+
+### Documentation
+
+- Add 47 checked examples for string and byte trees, Dynamic readers, composable decoders and URI helpers.
+- Point repository metadata and test badges to `pooka-lang/stdlib`.
+
 ## 0.3.0
 
 ### Added

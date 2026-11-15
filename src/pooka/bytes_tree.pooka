@@ -28,11 +28,23 @@ class _Leaf(value: BitArray) is BytesTree
 class _Branch(left: BytesTree, right: BytesTree) is BytesTree
 
 /// Start without any chunks.
+///
+/// ```pooka
+/// import pooka/bytes_tree
+///
+/// assert bytes_tree.is_empty(bytes_tree.new())
+/// ```
 new() -> BytesTree {
   _Empty()
 }
 
 /// Keep a chunk without copying its contents.
+///
+/// ```pooka
+/// import pooka/bytes_tree
+///
+/// assert bytes_tree.to_bit_array(bytes_tree.from_bit_array(<<1, 2>>)) == <<1, 2>>
+/// ```
 from_bit_array(value: BitArray) -> BytesTree {
   _Leaf(value)
 }
@@ -47,36 +59,83 @@ append(tree: BytesTree, value: BitArray) -> BytesTree {
 }
 
 /// Attach another tree without walking either side.
+///
+/// ```pooka
+/// import pooka/bytes_tree
+///
+/// let left = bytes_tree.from_bit_array(<<1:1>>)
+/// let right = bytes_tree.from_bit_array(<<0:1>>)
+/// assert bytes_tree.to_bit_array(bytes_tree.append_tree(left, right)) == <<2:2>>
+/// ```
 append_tree(left: BytesTree, right: BytesTree) -> BytesTree {
   _Branch(left, right)
 }
 
 /// Place one chunk before the earlier tree.
+///
+/// ```pooka
+/// import pooka/bytes_tree
+///
+/// let tree = bytes_tree.from_bit_array(<<2>>)
+/// assert bytes_tree.to_bit_array(bytes_tree.prepend(tree, <<1>>)) == <<1, 2>>
+/// ```
 prepend(tree: BytesTree, value: BitArray) -> BytesTree {
   append_tree(from_bit_array(value), tree)
 }
 
 /// Join trees in input order without rendering their chunks.
+///
+/// ```pooka
+/// import pooka/bytes_tree
+///
+/// let trees = [bytes_tree.from_bit_array(<<1>>), bytes_tree.from_bit_array(<<2>>)]
+/// assert bytes_tree.to_bit_array(bytes_tree.concat(trees)) == <<1, 2>>
+/// ```
 concat(trees: List(BytesTree)) -> BytesTree {
   list.fold(trees, new(), append_tree)
 }
 
 /// Keep each supplied chunk as a leaf.
+///
+/// ```pooka
+/// import pooka/bytes_tree
+///
+/// assert bytes_tree.to_bit_array(bytes_tree.from_bit_arrays([<<1>>, <<2>>])) == <<1, 2>>
+/// ```
 from_bit_arrays(values: List(BitArray)) -> BytesTree {
   list.fold(values, new(), append)
 }
 
 /// Render once, preserving every chunk's order.
+///
+/// ```pooka
+/// import pooka/bytes_tree
+///
+/// assert bytes_tree.to_bit_array(bytes_tree.new()) == <<>>
+/// ```
 to_bit_array(tree: BytesTree) -> BitArray {
   bit_array.concat(_chunks([tree], []))
 }
 
 /// Byte-oriented size rounds a partial final byte up after rendering.
+///
+/// ```pooka
+/// import pooka/bytes_tree
+///
+/// let tree = bytes_tree.from_bit_arrays([<<1:1>>, <<0:1>>])
+/// assert bytes_tree.byte_size(tree) == 1
+/// ```
 byte_size(tree: BytesTree) -> Int {
   _Sizes.quotient(bit_size(tree) + 7, 8)
 }
 
 /// Count every bit without rendering the tree.
+///
+/// ```pooka
+/// import pooka/bytes_tree
+///
+/// assert bytes_tree.bit_size(bytes_tree.from_bit_array(<<1:1>>)) == 1
+/// ```
 bit_size(tree: BytesTree) -> Int {
   list.fold(_chunks([tree], []), 0, fn(acc, value) {
     acc + bit_array.bit_size(value)
@@ -84,6 +143,12 @@ bit_size(tree: BytesTree) -> Int {
 }
 
 /// Ask whether rendering would produce an empty value.
+///
+/// ```pooka
+/// import pooka/bytes_tree
+///
+/// assert bytes_tree.is_empty(bytes_tree.from_bit_array(<<>>))
+/// ```
 is_empty(tree: BytesTree) -> Bool {
   bit_size(tree) == 0
 }

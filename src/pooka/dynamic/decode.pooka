@@ -29,6 +29,13 @@ class Decoder(a) {
   }
 
   /// Decode one input, retaining the structured failures.
+  ///
+  /// ```pooka
+  /// import pooka/dynamic
+  /// import pooka/dynamic/decode
+  ///
+  /// assert decode.int().run(dynamic.from(7)) == Ok(7)
+  /// ```
   run(value: Dynamic) -> Result(a, List(DecodeError)) {
     _read(value)
   }
@@ -65,6 +72,14 @@ _error(value: Dynamic, expected: String) -> Result(a, List(DecodeError)) {
 }
 
 /// Read a BEAM integer, including values beyond machine-word precision.
+///
+/// ```pooka
+/// import pooka/dynamic
+/// import pooka/dynamic/decode
+///
+/// assert decode.int().run(dynamic.from(7)) == Ok(7)
+/// let assert Error(_) = decode.int().run(dynamic.from("7"))
+/// ```
 int() -> Decoder(Int) {
   Decoder(fn(value) {
     match value.as_int() {
@@ -75,6 +90,14 @@ int() -> Decoder(Int) {
 }
 
 /// Read an actual BEAM float. Integers require an explicit conversion.
+///
+/// ```pooka
+/// import pooka/dynamic
+/// import pooka/dynamic/decode
+///
+/// assert decode.float().run(dynamic.from(2.5)) == Ok(2.5)
+/// let assert Error(_) = decode.float().run(dynamic.from(2))
+/// ```
 float() -> Decoder(Float) {
   Decoder(fn(value) {
     match value.as_float() {
@@ -85,6 +108,14 @@ float() -> Decoder(Float) {
 }
 
 /// Read only valid UTF-8 binaries; malformed text remains an error.
+///
+/// ```pooka
+/// import pooka/dynamic
+/// import pooka/dynamic/decode
+///
+/// assert decode.string().run(dynamic.from("owl")) == Ok("owl")
+/// let assert Error(_) = decode.string().run(dynamic.from(<<255>>))
+/// ```
 string() -> Decoder(String) {
   Decoder(fn(value) {
     match value.as_string() {
@@ -95,6 +126,13 @@ string() -> Decoder(String) {
 }
 
 /// Read the two boolean atoms, without treating other atoms as booleans.
+///
+/// ```pooka
+/// import pooka/dynamic
+/// import pooka/dynamic/decode
+///
+/// assert decode.bool().run(dynamic.from(False)) == Ok(False)
+/// ```
 bool() -> Decoder(Bool) {
   Decoder(fn(value) {
     match value.as_bool() {
@@ -105,6 +143,13 @@ bool() -> Decoder(Bool) {
 }
 
 /// Read any bitstring, including a non-byte-aligned suffix.
+///
+/// ```pooka
+/// import pooka/dynamic
+/// import pooka/dynamic/decode
+///
+/// assert decode.bit_array().run(dynamic.from(<<1:1>>)) == Ok(<<1:1>>)
+/// ```
 bit_array() -> Decoder(BitArray) {
   Decoder(fn(value) {
     match value.as_bits() {
@@ -115,11 +160,27 @@ bit_array() -> Decoder(BitArray) {
 }
 
 /// Return a known value without inspecting the input.
+///
+/// ```pooka
+/// import pooka/dynamic
+/// import pooka/dynamic/decode
+///
+/// assert decode.succeed("guest").run(dynamic.from(Nil)) == Ok("guest")
+/// ```
 succeed(value: a) -> Decoder(a) {
   Decoder(fn(_) { Ok(value) })
 }
 
 /// Reject the input with an application-defined expectation.
+///
+/// ```pooka
+/// import pooka/dynamic
+/// import pooka/dynamic/decode
+///
+/// let recipe: decode.Decoder(Int) = decode.failure("positive age")
+/// let assert Error([problem]) = recipe.run(dynamic.from(-1))
+/// assert problem.expected == "positive age"
+/// ```
 failure(expected: String) -> Decoder(a) {
   Decoder(fn(value) { _error(value, expected) })
 }
@@ -154,6 +215,15 @@ field(name: String, decoder: Decoder(a)) -> Decoder(a) {
 }
 
 /// Missing fields become None; present invalid values still report an error.
+///
+/// ```pooka
+/// import pooka/dynamic
+/// import pooka/dynamic/decode
+///
+/// let recipe = decode.optional_field("age", decode.int())
+/// assert recipe.run(dynamic.from_pairs([#("name", "owl")])) == Ok(None)
+/// let assert Error(_) = recipe.run(dynamic.from_pairs([#("age", "seven")]))
+/// ```
 optional_field(name: String, decoder: Decoder(a)) -> Decoder(Option(a)) {
   Decoder(fn(value) {
     match value.kind() == "Map" {
@@ -170,6 +240,13 @@ optional_field(name: String, decoder: Decoder(a)) -> Decoder(Option(a)) {
 }
 
 /// Read a zero-based tuple element. Lists use the list decoder instead.
+///
+/// ```pooka
+/// import pooka/dynamic
+/// import pooka/dynamic/decode
+///
+/// assert decode.element(1, decode.string()).run(dynamic.from(#(7, "owl"))) == Ok("owl")
+/// ```
 element(index: Int, decoder: Decoder(a)) -> Decoder(a) {
   Decoder(fn(value) {
     match value.kind() == "Tuple" {
@@ -185,6 +262,16 @@ element(index: Int, decoder: Decoder(a)) -> Decoder(a) {
 }
 
 /// Decode every proper-list element, collecting errors in input order.
+///
+/// ```pooka
+/// import pooka/list as lists
+/// import pooka/dynamic
+/// import pooka/dynamic/decode
+///
+/// assert decode.list(decode.int()).run(dynamic.from([1, 2])) == Ok([1, 2])
+/// let assert Error(errors) = decode.list(decode.int()).run(dynamic.from(["a", "b"]))
+/// assert lists.length(errors) == 2
+/// ```
 list(decoder: Decoder(a)) -> Decoder(List(a)) {
   Decoder(fn(value) {
     match value.as_list() {
@@ -214,6 +301,15 @@ list(decoder: Decoder(a)) -> Decoder(List(a)) {
 }
 
 /// Try alternatives in order. Keep all explanations when none succeeds.
+///
+/// ```pooka
+/// import pooka/string
+/// import pooka/dynamic
+/// import pooka/dynamic/decode
+///
+/// let recipe = decode.one_of([decode.int(), decode.string().map(fn(text) { string.length(text) })])
+/// assert recipe.run(dynamic.from("owl")) == Ok(3)
+/// ```
 one_of(decoders: List(Decoder(a))) -> Decoder(a) {
   Decoder(fn(value) { _alternatives(decoders, value, []) })
 }

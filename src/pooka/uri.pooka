@@ -27,6 +27,13 @@ class Uri(
   fragment: Option(String)
 ) {
   /// Recompose without normalization. Invalid component combinations return Error.
+  ///
+  /// ```pooka
+  /// import pooka/uri
+  ///
+  /// let assert Ok(address) = uri.parse("https://example.org/owls?q=oak")
+  /// assert address.to_string() == Ok("https://example.org/owls?q=oak")
+  /// ```
   to_string() -> Result(String, UriError) {
     match _Uri.uri_recompose(
       scheme,
@@ -77,6 +84,15 @@ external _Uri from erlang "pooka_stdlib_ffi" {
 }
 
 /// Parse an absolute URI or a relative reference, preserving encoded components.
+///
+/// ```pooka
+/// import pooka/uri
+///
+/// let assert Ok(address) = uri.parse("/owls?page=2")
+/// assert address.scheme == None
+/// assert address.path == "/owls"
+/// assert address.query == Some("page=2")
+/// ```
 parse(text: String) -> Result(Uri, UriError) {
   match _Uri.uri_parse(text, Uri) {
     Ok(value) -> Ok(value)
@@ -94,6 +110,14 @@ percent_encode(text: String) -> String {
 }
 
 /// Decode percent escapes as UTF-8. Plus stays plus outside query strings.
+///
+/// ```pooka
+/// import pooka/uri
+///
+/// assert uri.percent_decode("a%2Bb") == Ok("a+b")
+/// assert uri.percent_decode("a+b") == Ok("a+b")
+/// let assert Error(_) = uri.percent_decode("%zz")
+/// ```
 percent_decode(text: String) -> Result(String, UriError) {
   match _Uri.uri_decode(text) {
     Ok(value) -> Ok(value)
@@ -102,11 +126,23 @@ percent_decode(text: String) -> Result(String, UriError) {
 }
 
 /// Form-encode ordered key/value pairs. Duplicate keys are preserved.
+///
+/// ```pooka
+/// import pooka/uri
+///
+/// assert uri.compose_query([#("q", "oak & ash")]) == "q=oak+%26+ash"
+/// ```
 compose_query(pairs: List(#(String, String))) -> String {
   _Uri.uri_query_encode(pairs)
 }
 
 /// Decode form fields in order. Bare keys have empty values; plus means space.
+///
+/// ```pooka
+/// import pooka/uri
+///
+/// assert uri.dissect_query("tag=oak&tag=ash&empty") == Ok([#("tag", "oak"), #("tag", "ash"), #("empty", "")])
+/// ```
 dissect_query(text: String) -> Result(List(#(String, String)), UriError) {
   match _Uri.uri_query_decode(text) {
     Ok(value) -> Ok(value)
