@@ -16,6 +16,8 @@
 module list
 
 import pooka/order.{Order}
+import pooka/dict
+import pooka/internal/traversal
 
 external _Primitives from erlang "pooka_stdlib_ffi" {
   cons(values: List(a), value: a) -> List(a)
@@ -180,9 +182,7 @@ reverse(values: List(a)) -> List(a) {
 /// assert list.map([1, 2], fn(x) { x * 2 }) == [2, 4]
 /// ```
 map(values: List(a), transform: fn(a) -> b) -> List(b) {
-  values
-  |> fold([], fn(acc, x) { prepend(acc, transform(x)) })
-  |> reverse()
+  traversal.map(values, transform)
 }
 
 /// Keep the elements whose predicate returns True, preserving their order.
@@ -193,14 +193,7 @@ map(values: List(a), transform: fn(a) -> b) -> List(b) {
 /// assert list.filter([1, 2, 3], fn(x) { x > 1 }) == [2, 3]
 /// ```
 filter(values: List(a), keep: fn(a) -> Bool) -> List(a) {
-  values
-  |> fold([], fn(acc, x) {
-    match keep(x) {
-      True -> prepend(acc, x)
-      False -> acc
-    }
-  })
-  |> reverse()
+  traversal.filter(values, keep)
 }
 
 /// Let each callback either send a transformed value onward or quietly return
@@ -231,10 +224,7 @@ filter_map(values: List(a), transform: fn(a) -> Option(b)) -> List(b) {
 /// assert list.fold([1, 2, 3], 0, fn(acc, x) { acc + x }) == 6
 /// ```
 fold(values: List(a), initial: b, step: fn(b, a) -> b) -> b {
-  match values {
-    [] -> initial
-    [x, ..rest] -> fold(rest, step(initial, x), step)
-  }
+  traversal.fold(values, initial, step)
 }
 
 /// Stop at the first element accepted by the predicate.
@@ -277,7 +267,7 @@ any(values: List(a), predicate: fn(a) -> Bool) -> Bool {
 /// assert list.all([], fn(x: Int) { x > 0 })
 /// ```
 all(values: List(a), predicate: fn(a) -> Bool) -> Bool {
-  !any(values, fn(x) { !predicate(x) })
+  traversal.all(values, predicate)
 }
 
 /// Test membership with the language's equality operation.
@@ -489,9 +479,7 @@ _zip(left, right, acc) {
 /// list.each([1, 2], fn(n) { assert n > 0 })
 /// ```
 each(values: List(a), visit: fn(a) -> Nil) -> Nil {
-  loop value in values {
-    visit(value)
-  }
+  traversal.each(values, visit)
 }
 
 /// Give matching and non-matching values separate seats, preserving both orders.
@@ -720,6 +708,146 @@ try_each(values: List(a), visit: fn(a) -> Result(Nil, e)) -> Result(Nil, e) {
     [head, ..tail] -> {
       let _ = visit(head)?
       try_each(tail, visit)
+    }
+  }
+}
+
+/// Keep the longest matching prefix. The first False ends the visit.
+///
+/// ```pooka
+/// assert list.take_while([1, 2, 0, 3], fn(n) { n > 0 }) == [1, 2]
+/// ```
+take_while(values: List(a), keep: fn(a) -> Bool) -> List(a) {
+  let #(prefix, _) = split_while(values, keep)
+  prefix
+}
+
+/// Return the suffix after the longest matching prefix.
+///
+/// ```pooka
+/// assert list.drop_while([1, 2, 0, 3], fn(n) { n > 0 }) == [0, 3]
+/// ```
+drop_while(values: List(a), keep: fn(a) -> Bool) -> List(a) {
+  match values {
+    [] -> []
+    [head, ..tail] -> match keep(head) {
+      True -> drop_while(tail, keep)
+      False -> values
+    }
+  }
+}
+
+/// Divide into nonempty chunks. Non-positive sizes produce no chunks.
+///
+/// ```pooka
+/// assert list.chunk([1, 2, 3], 2) == [[1, 2], [3]]
+/// ```
+chunk(values: List(a), size: Int) -> List(List(a)) {
+  match size <= 0 {
+    True -> []
+    False -> _chunk(values, size, [])
+  }
+}
+
+_chunk(values, size, acc) {
+  match values {
+    [] -> reverse(acc)
+    _ -> {
+      let #(head, tail) = split(values, size)
+      _chunk(tail, size, prepend(acc, head))
+    }
+  }
+}
+
+/// Group equal keys in a dictionary; each group keeps input order.
+///
+/// ```pooka
+/// assert list.group([1, 2, 3], fn(n) { n % 2 }).get(1) == Some([1, 3])
+/// ```
+group(values: List(a), key: fn(a) -> k) -> dict.Dict(k, List(a)) {
+  fold(values, dict.empty(), fn(groups, value) {
+    groups.upsert(key(value), fn(previous) {
+      match previous {
+        None -> [value]
+        Some(items) -> prepend(items, value)
+      }
+    })
+  }).map_values(reverse)
+}
+
+/// A fold may continue with an accumulator or stop with its final value.
+/// The base FoldStep constructor continues, just like Continue.
+class FoldStep(value: a) {}
+
+/// Continue visiting values with this accumulator.
+class Continue(a) is FoldStep(a) {
+  new(value: a) {
+    super.new(value)
+  }
+}
+
+/// Stop visiting values and return this accumulator.
+class Stop(a) is FoldStep(a) {
+  new(value: a) {
+    super.new(value)
+  }
+}
+
+/// Fold until Stop, without visiting the remaining values.
+///
+/// ```pooka
+/// assert list.fold_until([1, 2], 0, fn(acc, n) { list.Stop(acc + n) }) == 1
+/// ```
+fold_until(values: List(a), initial: b, step: fn(b, a) -> FoldStep(b)) -> b {
+  match values {
+    [] -> initial
+    [head, ..tail] -> match step(initial, head) {
+      Stop(done) -> done
+      Continue(next) -> fold_until(tail, next, step)
+      FoldStep(next) -> fold_until(tail, next, step)
+    }
+  }
+}
+
+/// Fold a nonempty list using its first element as the initial accumulator.
+///
+/// ```pooka
+/// assert list.reduce([1, 2, 3], fn(a, b) { a + b }) == Some(6)
+/// ```
+reduce(values: List(a), step: fn(a, a) -> a) -> Option(a) {
+  match values {
+    [] -> None
+    [head, ..tail] -> Some(fold(tail, head, step))
+  }
+}
+
+/// Group consecutive elements with equal keys, keeping separate later runs.
+///
+/// ```pooka
+/// assert list.chunk_by([1, 3, 2, 4, 5], fn(n) { n % 2 }) == [[1, 3], [2, 4], [5]]
+/// ```
+chunk_by(values: List(a), key: fn(a) -> k) -> List(List(a)) {
+  match values {
+    [] -> []
+    [head, ..tail] -> _chunk_by(tail, key, key(head), [head], [])
+  }
+}
+
+_chunk_by(values, key, previous, current, chunks) {
+  match values {
+    [] -> reverse([reverse(current), ..chunks])
+    [head, ..tail] -> {
+      let next = key(head)
+      match next == previous {
+        True -> _chunk_by(tail, key, previous, [head, ..current], chunks)
+        False -> _chunk_by(
+          tail,
+          key,
+          next,
+          [head],
+          [reverse(current), ..chunks]
+        )
+      }
     }
   }
 }

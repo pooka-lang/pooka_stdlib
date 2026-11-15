@@ -1,0 +1,66 @@
+//// The envelopes keep their order, and sleeping callbacks stay asleep.
+
+module result_option_extensions_test
+
+import pooka/result
+import pooka/option
+import pooka/list
+
+test "result all preserves order and the first error" {
+  assert result.all([]) == Ok([])
+  assert result.all([Ok(1), Ok(2), Ok(3)]) == Ok([1, 2, 3])
+  assert result.all([Ok(1), Error("first"), Error("second")]) == Error("first")
+  assert result.all([Error("first"), Ok(2)]) == Error("first")
+}
+
+test "result flatten preserves either error layer" {
+  assert result.flatten(Ok(Ok(1))) == Ok(1)
+  assert result.flatten(Ok(Error("inner"))) == Error("inner")
+  assert result.flatten(Error("outer")) == Error("outer")
+}
+
+test "recovery is lazy and may replace the error type" {
+  assert result.recover(Ok(7), fn(_) { panic as "unexpected recovery" }) == Ok(
+    7
+  )
+  assert result.recover(Error("lost"), fn(error) { Ok(error + " found") }) == Ok(
+    "lost found"
+  )
+  assert result.recover(Error("lost"), fn(_) { Error(7) }) == Error(7)
+}
+
+test "partition and values keep input order" {
+  let values = [Ok(1), Error("a"), Ok(2), Error("b")]
+  assert result.partition(values) == #([1, 2], ["a", "b"])
+  assert result.partition([]) == #([], [])
+  assert result.values(values) == [1, 2]
+  assert result.values([Error("no")]) == []
+}
+
+test "option all requires every value" {
+  assert option.all([]) == Some([])
+  assert option.all([Some(1), Some(2)]) == Some([1, 2])
+  assert option.all([Some(1), None, Some(2)]) == None
+  assert option.all([None]) == None
+}
+
+test "option flatten handles all layers" {
+  assert option.flatten(Some(Some(1))) == Some(1)
+  assert option.flatten(Some(None)) == None
+  assert option.flatten(None) == None
+}
+
+test "option alternative is lazy" {
+  assert option.or_else(Some(7), fn() { panic as "unexpected alternative" }) == Some(
+    7
+  )
+  assert option.or_else(None, fn() { Some(7) }) == Some(7)
+  assert option.or_else(None, fn() { None }) == None
+  assert option.values([None, Some(1), None, Some(2)]) == [1, 2]
+}
+
+test "collecting a large list is stack safe" {
+  let values = list.range(0, 10000)
+  assert result.all(list.map(values, fn(n) { Ok(n) })) == Ok(values)
+  assert option.all(list.map(values, fn(n) { Some(n) })) == Some(values)
+}
