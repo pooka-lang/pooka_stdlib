@@ -16,8 +16,11 @@
 module string
 
 import pooka/list
+import pooka/order.{Order}
 
 external _Text from erlang "pooka_stdlib_ffi" {
+  string_compare(left: String, right: String) -> Int
+
   string_points(text: String) -> List(Int)
 
   string_from_points(points: List(Int)) -> String
@@ -287,4 +290,19 @@ drop_end(text: String, count: Int) -> String {
     True -> text
     False -> slice(text, 0, length(text) - count)
   }
+}
+
+/// Put two strings in Unicode code point order, one letter before the next.
+/// Empty strings come first; a shared prefix comes before its longer neighbour.
+/// This comparison does not normalize text or apply locale-specific rules.
+///
+/// ```pooka
+/// import pooka/string
+/// import pooka/order.{Order}
+///
+/// assert string.compare("fig", "oak") == Order.Less
+/// assert string.compare("🐇", "🐇") == Order.Equal
+/// ```
+compare(left: String, right: String) -> Order {
+  order.from_int(_Text.string_compare(left, right))
 }

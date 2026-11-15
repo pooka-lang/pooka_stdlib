@@ -11,6 +11,8 @@
 module string_test
 
 import pooka/string
+import pooka/list
+import pooka/order.{Order}
 
 // The rabbit occupies several UTF-8 bytes but one code point. The accent
 // after e is another code point, even when the two look like one printed letter.
@@ -96,4 +98,38 @@ test "Unicode separators and slices retain combining code points" {
   assert string.slice("é🐇", 2, 99) == "🐇"
   assert string.slice("é🐇", 3, 1) == ""
   assert string.join(["", "α", ""], "🐇") == "🐇α🐇"
+}
+
+class Entry(name: String, position: Int)
+
+test "comparison handles equality empty strings and shared prefixes" {
+  assert string.compare("", "") == Order.Equal
+  assert string.compare("", "a") == Order.Less
+  assert string.compare("a", "") == Order.Greater
+  assert string.compare("oak", "oak") == Order.Equal
+  assert string.compare("oak", "oaks") == Order.Less
+  assert string.compare("oaks", "oak") == Order.Greater
+  assert string.compare("oak", "fig") == Order.Greater
+  assert string.compare("A", "a") == Order.Less
+}
+
+test "comparison orders Unicode code points without normalization" {
+  assert string.compare("é", "Ω") == Order.Less
+  assert string.compare("Ω", "🐇") == Order.Less
+  assert string.compare("🐇", "🦉") == Order.Less
+  assert string.compare("é", "é") == Order.Less
+  assert string.compare("a\u{0}", "a") == Order.Greater
+}
+
+test "custom string sorting agrees with default sorting" {
+  let values = ["🦉", "oak", "", "é", "a", "🐇", "é", "a", "aa"]
+  assert list.sort_by(values, string.compare) == list.sort(values)
+  assert list.sort_by(list.reverse(values), string.compare) == list.sort(values)
+}
+
+test "sorting by a string field is stable" {
+  let values = [Entry("Fig", 1), Entry("Ada", 2), Entry("Fig", 3)]
+  assert list.sort_by(values, fn(a: Entry, b: Entry) {
+    string.compare(a.name, b.name)
+  }) == [Entry("Ada", 2), Entry("Fig", 1), Entry("Fig", 3)]
 }

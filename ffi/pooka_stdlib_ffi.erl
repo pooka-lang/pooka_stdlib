@@ -31,6 +31,7 @@
     dict_new/1,
     dict_from_list/2,
     string_points/1,
+    string_compare/2,
     string_from_points/1,
     string_concat/2,
     string_join/2,
@@ -159,6 +160,13 @@ dict_wrap(Map, Create) ->
 %% ```erlang
 %% string_points(<<"A">>). % [65]
 %% ```
+%% Valid UTF-8 keeps code point order in its byte representation. Compare the
+%% binaries directly, with no temporary lists, normalization or locale rules.
+%% string_compare(<<"fig">>, <<"oak">>) -> -1.
+string_compare(A, B) when A < B -> -1;
+string_compare(A, B) when A > B -> 1;
+string_compare(_, _) -> 0.
+
 string_points(B) -> unicode:characters_to_list(B, utf8).
 
 %% Encode a code-point list as a UTF-8 binary.

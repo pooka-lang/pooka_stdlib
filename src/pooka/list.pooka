@@ -353,6 +353,20 @@ sort(values: List(a)) -> List(a) {
 ///
 /// assert list.sort_by([3, 1, 2], fn(a, b) { order.from_int(a - b) }) == [1, 2, 3]
 /// ```
+///
+/// A string field can lead the procession too. Equal names keep their order.
+///
+/// ```pooka
+/// import pooka/list
+/// import pooka/string
+///
+/// class Owl(name: String)
+///
+/// let owls = [Owl("Fig"), Owl("Ada")]
+/// assert list.sort_by(owls, fn(a: Owl, b: Owl) {
+///   string.compare(a.name, b.name)
+/// }) == [Owl("Ada"), Owl("Fig")]
+/// ```
 sort_by(values: List(a), compare: fn(a, a) -> Order) -> List(a) {
   match values {
     [] -> []

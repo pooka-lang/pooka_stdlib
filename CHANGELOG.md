@@ -2,6 +2,12 @@
 
 All notable changes to the Pooka standard library are documented in this file.
 
+## Unreleased
+
+### Added
+
+- Compare strings in Unicode code point order with `string.compare`, including stable sorting by string fields (#5).
+
 ## 0.2.0
 
 ### Performance
