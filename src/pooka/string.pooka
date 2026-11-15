@@ -21,6 +21,12 @@ import pooka/order.{Order}
 external _Text from erlang "pooka_stdlib_ffi" {
   string_compare(left: String, right: String) -> Int
 
+  string_graphemes(text: String) -> List(String)
+
+  string_byte_size(text: String) -> Int
+
+  quotient(a: Int, b: Int) -> Int
+
   string_points(text: String) -> List(Int)
 
   string_from_points(points: List(Int)) -> String
@@ -305,4 +311,107 @@ drop_end(text: String, count: Int) -> String {
 /// ```
 compare(left: String, right: String) -> Order {
   order.from_int(_Text.string_compare(left, right))
+}
+
+/// Count encoded bytes rather than code points or visible characters.
+///
+/// ```pooka
+/// assert string.byte_size("é") == 2
+/// ```
+byte_size(text: String) -> Int {
+  _Text.string_byte_size(text)
+}
+
+/// Remove one matching prefix; otherwise leave the string alone.
+///
+/// ```pooka
+/// assert string.remove_prefix("moonlight", "moon") == "light"
+/// ```
+remove_prefix(text: String, prefix: String) -> String {
+  match starts_with(text, prefix) {
+    True -> drop_start(text, length(prefix))
+    False -> text
+  }
+}
+
+/// Remove one matching suffix, including an empty suffix harmlessly.
+///
+/// ```pooka
+/// assert string.remove_suffix("moonlight", "light") == "moon"
+/// ```
+remove_suffix(text: String, suffix: String) -> String {
+  match ends_with(text, suffix) {
+    True -> drop_end(text, length(suffix))
+    False -> text
+  }
+}
+
+/// Pad to a code point width, cycling and truncating the supplied padding.
+/// An empty padding string or an already wide value stays unchanged.
+///
+/// ```pooka
+/// assert string.pad_start("7", 4, "ab") == "aba7"
+/// ```
+pad_start(text: String, width: Int, padding: String) -> String {
+  concat(_padding(width - length(text), padding), text)
+}
+
+/// Pad the right edge using the same code point policy as pad_start.
+///
+/// ```pooka
+/// assert string.pad_end("7", 4, "ab") == "7aba"
+/// ```
+pad_end(text: String, width: Int, padding: String) -> String {
+  concat(text, _padding(width - length(text), padding))
+}
+
+_padding(count, padding) {
+  match count <= 0 || is_empty(padding) {
+    True -> ""
+    False -> slice(
+      repeat(
+        padding,
+        _Text.quotient(count + length(padding) - 1, length(padding))
+      ),
+      0,
+      count
+    )
+  }
+}
+
+/// Split user-perceived characters without separating their combining marks.
+/// No normalization is performed. Existing length and slice remain code-point APIs.
+///
+/// ```pooka
+/// assert string.graphemes("é🐇") == ["é", "🐇"]
+/// ```
+graphemes(text: String) -> List(String) {
+  _Text.string_graphemes(text)
+}
+
+/// Count grapheme clusters, including a joined emoji as one cluster.
+///
+/// ```pooka
+/// assert string.grapheme_length("é") == 1
+/// ```
+grapheme_length(text: String) -> Int {
+  list.length(graphemes(text))
+}
+
+/// Slice at grapheme boundaries. Negative offsets clamp to zero, as slice does.
+///
+/// ```pooka
+/// assert string.grapheme_slice("é🐇", 0, 1) == "é"
+/// ```
+grapheme_slice(text: String, start: Int, count: Int) -> String {
+  graphemes(text) |> list.drop(start) |> list.take(count) |> join("")
+}
+
+/// Reverse visible clusters while keeping each cluster's code points together.
+///
+/// ```pooka
+/// assert string.reverse_graphemes("é🐇") == "🐇é"
+/// ```
+reverse_graphemes(text: String) -> String {
+  graphemes(text) |> list.reverse() |> join("")
 }

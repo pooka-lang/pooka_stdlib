@@ -1,0 +1,91 @@
+//// A visible letter may carry several code points in its coat.
+
+module text_extensions_test
+
+import pooka/string
+import pooka/list
+import pooka/string_tree
+import pooka/bytes_tree
+import pooka/bit_array
+
+test "padding cycles code points without overshooting" {
+  assert string.pad_start("7", 4, "ab") == "aba7"
+  assert string.pad_end("7", 4, "ab") == "7aba"
+  assert string.pad_end("oak", 2, "x") == "oak"
+  assert string.pad_start("oak", -1, "x") == "oak"
+  assert string.pad_start("7", 4, "") == "7"
+  assert string.pad_start("", 3, "é🐇") == "é🐇é"
+}
+
+test "prefix and suffix removal changes only a complete match" {
+  assert string.remove_prefix("oak", "o") == "ak"
+  assert string.remove_prefix("oak", "oak") == ""
+  assert string.remove_prefix("oak", "oaks") == "oak"
+  assert string.remove_prefix("oak", "") == "oak"
+  assert string.remove_suffix("oak", "ak") == "o"
+  assert string.remove_suffix("oak", "oaks") == "oak"
+  assert string.remove_suffix("oak", "") == "oak"
+  assert string.remove_suffix("é🐇", "🐇") == "é"
+}
+
+test "code points bytes and graphemes remain distinct" {
+  assert string.length("é") == 2
+  assert string.byte_size("é") == 3
+  assert string.grapheme_length("é") == 1
+  assert string.graphemes("é🐇") == ["é", "🐇"]
+  assert string.graphemes("") == []
+  assert string.graphemes("👩‍💻🇬🇷") == ["👩‍💻", "🇬🇷"]
+  assert string.grapheme_slice("é🐇oak", 0, 2) == "é🐇"
+  assert string.grapheme_slice("é🐇", -1, 1) == "é"
+  assert string.grapheme_slice("é🐇", 10, 1) == ""
+  assert string.grapheme_slice("é🐇", 0, -1) == ""
+  assert string.reverse_graphemes("é🐇") == "🐇é"
+}
+
+test "text trees retain order and old versions" {
+  let old = string_tree.from_string("oak")
+  let tree = string_tree.append(old, "🐇") |> string_tree.prepend("é")
+  assert string_tree.to_string(old) == "oak"
+  assert string_tree.to_string(tree) == "éoak🐇"
+  assert string_tree.byte_size(tree) == 9
+  assert string_tree.is_empty(string_tree.new())
+  assert string_tree.is_empty(string_tree.from_string(""))
+  assert string_tree.to_string(string_tree.concat([old, tree])) == "oakéoak🐇"
+}
+
+test "deep left and right trees render without recursive stack growth" {
+  let left = list.fold(list.range(0, 20000), string_tree.new(), fn(tree, _) {
+    string_tree.append(tree, "x")
+  })
+  let right = list.fold(list.range(0, 20000), string_tree.new(), fn(tree, _) {
+    string_tree.prepend(tree, "x")
+  })
+  assert string_tree.byte_size(left) == 20000
+  assert string_tree.to_string(left) == string_tree.to_string(right)
+  assert string_tree.to_string(string_tree.from_strings(["a", "", "é"])) == "aé"
+}
+
+test "byte trees preserve partial bits and combine bit counts before rounding" {
+  let tree = bytes_tree.from_bit_array(<<1:size(1)>>) |> bytes_tree.append(
+    <<0:size(7)>>
+  )
+  assert bytes_tree.to_bit_array(tree) == <<128>>
+  assert bytes_tree.bit_size(tree) == 8
+  assert bytes_tree.byte_size(tree) == 1
+  assert bytes_tree.byte_size(bytes_tree.from_bit_array(<<1:size(1)>>)) == 1
+  assert bytes_tree.is_empty(bytes_tree.new())
+  assert bytes_tree.to_bit_array(bytes_tree.from_bit_arrays([<<1>>, <<2>>])) == <<1, 2>>
+  assert bytes_tree.to_bit_array(bytes_tree.prepend(tree, <<3>>)) == <<3, 128>>
+}
+
+test "chunk rendering agrees with joining ordinary values" {
+  let chunks = list.map(list.range(0, 1000), fn(_) { "é🐇" })
+  assert string_tree.to_string(string_tree.from_strings(chunks)) == string.join(
+    chunks,
+    ""
+  )
+  let bits = list.map(chunks, bit_array.from_string)
+  assert bytes_tree.to_bit_array(bytes_tree.from_bit_arrays(bits)) == bit_array.concat(
+    bits
+  )
+}

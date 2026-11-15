@@ -1,0 +1,115 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// An address has several rooms; its query is not its path.
+//// Parse RFC 3986 references through OTP, keeping absent components distinct
+//// from present empty ones. Parsing does not normalize, decode path escapes or
+//// establish that a remote address exists. Query helpers use HTML form encoding;
+//// component escaping keeps plus signs literal and escapes reserved characters.
+////
+//// ```pooka
+//// let assert Ok(address) = uri.parse("https://example.com/tea?q=oak")
+//// assert address.host == Some("example.com")
+//// ```
+
+module uri
+
+/// A parsing or encoding failure. Input is retained for callers to describe.
+class UriError(input: String, message: String)
+
+/// URI components. Optional empty components remain distinguishable from absence.
+class Uri(
+  scheme: Option(String),
+  userinfo: Option(String),
+  host: Option(String),
+  port: Option(Int),
+  path: String,
+  query: Option(String),
+  fragment: Option(String)
+) {
+  /// Recompose without normalization. Invalid component combinations return Error.
+  to_string() -> Result(String, UriError) {
+    match _Uri.uri_recompose(
+      scheme,
+      userinfo,
+      host,
+      port,
+      path,
+      query,
+      fragment
+    ) {
+      Ok(value) -> Ok(value)
+      Error(message) -> Error(UriError(path, message))
+    }
+  }
+}
+
+external _Uri from erlang "pooka_stdlib_ffi" {
+  uri_parse(
+    text: String,
+    create: fn(
+      Option(String),
+      Option(String),
+      Option(String),
+      Option(Int),
+      String,
+      Option(String),
+      Option(String)
+    ) -> Uri
+  ) -> Result(Uri, String)
+
+  uri_recompose(
+    scheme: Option(String),
+    userinfo: Option(String),
+    host: Option(String),
+    port: Option(Int),
+    path: String,
+    query: Option(String),
+    fragment: Option(String)
+  ) -> Result(String, String)
+
+  uri_encode(text: String) -> String
+
+  uri_decode(text: String) -> Result(String, String)
+
+  uri_query_encode(pairs: List(#(String, String))) -> String
+
+  uri_query_decode(text: String) -> Result(List(#(String, String)), String)
+}
+
+/// Parse an absolute URI or a relative reference, preserving encoded components.
+parse(text: String) -> Result(Uri, UriError) {
+  match _Uri.uri_parse(text, Uri) {
+    Ok(value) -> Ok(value)
+    Error(message) -> Error(UriError(text, message))
+  }
+}
+
+/// Escape one UTF-8 component, leaving only RFC 3986 unreserved characters.
+///
+/// ```pooka
+/// assert uri.percent_encode("a +") == "a%20%2B"
+/// ```
+percent_encode(text: String) -> String {
+  _Uri.uri_encode(text)
+}
+
+/// Decode percent escapes as UTF-8. Plus stays plus outside query strings.
+percent_decode(text: String) -> Result(String, UriError) {
+  match _Uri.uri_decode(text) {
+    Ok(value) -> Ok(value)
+    Error(message) -> Error(UriError(text, message))
+  }
+}
+
+/// Form-encode ordered key/value pairs. Duplicate keys are preserved.
+compose_query(pairs: List(#(String, String))) -> String {
+  _Uri.uri_query_encode(pairs)
+}
+
+/// Decode form fields in order. Bare keys have empty values; plus means space.
+dissect_query(text: String) -> Result(List(#(String, String)), UriError) {
+  match _Uri.uri_query_decode(text) {
+    Ok(value) -> Ok(value)
+    Error(message) -> Error(UriError(text, message))
+  }
+}

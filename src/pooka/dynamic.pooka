@@ -1,0 +1,136 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// A foreign value arrives without a trustworthy label.
+//// Keep it behind checked readers rather than calling an unchecked cast a type.
+//// Primitive readers distinguish integers from floats and UTF-8 text from bytes.
+//// Lists must be proper; map fields use UTF-8 binary keys and tuple indexes start
+//// at zero. This is an Erlang boundary, not a general serializer for Pooka classes.
+////
+//// ```pooka
+//// assert dynamic.from(42).as_int() == Some(42)
+//// assert dynamic.from("42").as_int() == None
+//// ```
+
+module dynamic
+
+external _Values from erlang "pooka_stdlib_ffi" {
+  dynamic_wrap(
+    value: a,
+    create: fn(
+      fn() -> Option(Int),
+      fn() -> Option(Float),
+      fn() -> Option(String),
+      fn() -> Option(Bool),
+      fn() -> Option(BitArray),
+      fn() -> Option(List(Dynamic)),
+      fn(String) -> Option(Dynamic),
+      fn(Int) -> Option(Dynamic),
+      fn() -> String
+    ) -> Dynamic
+  ) -> Dynamic
+
+  dynamic_from_pairs(
+    pairs: List(#(String, a)),
+    create: fn(
+      fn() -> Option(Int),
+      fn() -> Option(Float),
+      fn() -> Option(String),
+      fn() -> Option(Bool),
+      fn() -> Option(BitArray),
+      fn() -> Option(List(Dynamic)),
+      fn(String) -> Option(Dynamic),
+      fn(Int) -> Option(Dynamic),
+      fn() -> String
+    ) -> Dynamic
+  ) -> Dynamic
+}
+
+/// Checked capabilities over one captured BEAM value. No raw term is exposed.
+class Dynamic {
+  let _int: fn() -> Option(Int)
+  let _float: fn() -> Option(Float)
+  let _string: fn() -> Option(String)
+  let _bool: fn() -> Option(Bool)
+  let _bits: fn() -> Option(BitArray)
+  let _list: fn() -> Option(List(Dynamic))
+  let _field: fn(String) -> Option(Dynamic)
+  let _element: fn(Int) -> Option(Dynamic)
+  let _kind: fn() -> String
+
+  new(
+    int: fn() -> Option(Int),
+    float: fn() -> Option(Float),
+    string: fn() -> Option(String),
+    bool: fn() -> Option(Bool),
+    bits: fn() -> Option(BitArray),
+    list: fn() -> Option(List(Dynamic)),
+    field: fn(String) -> Option(Dynamic),
+    element: fn(Int) -> Option(Dynamic),
+    kind: fn() -> String
+  ) {
+    self._int = int
+    self._float = float
+    self._string = string
+    self._bool = bool
+    self._bits = bits
+    self._list = list
+    self._field = field
+    self._element = element
+    self._kind = kind
+  }
+
+  /// Read int only when the captured runtime shape permits it.
+  as_int() -> Option(Int) {
+    _int()
+  }
+
+  /// Read float only when the captured runtime shape permits it.
+  as_float() -> Option(Float) {
+    _float()
+  }
+
+  /// Read string only when the captured runtime shape permits it.
+  as_string() -> Option(String) {
+    _string()
+  }
+
+  /// Read bool only when the captured runtime shape permits it.
+  as_bool() -> Option(Bool) {
+    _bool()
+  }
+
+  /// Read bits only when the captured runtime shape permits it.
+  as_bits() -> Option(BitArray) {
+    _bits()
+  }
+
+  /// Read list only when the captured runtime shape permits it.
+  as_list() -> Option(List(Dynamic)) {
+    _list()
+  }
+
+  /// Read field only when the captured runtime shape permits it.
+  field(name: String) -> Option(Dynamic) {
+    _field(name)
+  }
+
+  /// Read element only when the captured runtime shape permits it.
+  element(index: Int) -> Option(Dynamic) {
+    _element(index)
+  }
+
+  /// Read kind only when the captured runtime shape permits it.
+  kind() -> String {
+    _kind()
+  }
+}
+
+/// Capture any value through checked readers. It gains no new static claims.
+from(value: a) -> Dynamic {
+  _Values.dynamic_wrap(value, Dynamic)
+}
+
+/// Construct a foreign-style binary-key map for decoding. Last duplicate wins.
+from_pairs(pairs: List(#(String, a))) -> Dynamic {
+  _Values.dynamic_from_pairs(pairs, Dynamic)
+}

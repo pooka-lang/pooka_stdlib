@@ -27,11 +27,21 @@
 
 -export([
     cons/2,
+    uri_parse/2,
+    uri_recompose/7,
+    uri_encode/1,
+    uri_decode/1,
+    uri_query_encode/1,
+    uri_query_decode/1,
+    dynamic_wrap/2,
+    dynamic_from_pairs/2,
     quotient/2,
     dict_new/1,
     dict_from_list/2,
     string_points/1,
     string_compare/2,
+    string_graphemes/1,
+    string_byte_size/1,
     string_from_points/1,
     string_concat/2,
     string_join/2,
@@ -155,11 +165,6 @@ dict_wrap(Map, Create) ->
         end
     ).
 
-%% Decode a trusted UTF-8 binary into Unicode code-point integers.
-%%
-%% ```erlang
-%% string_points(<<"A">>). % [65]
-%% ```
 %% Valid UTF-8 keeps code point order in its byte representation. Compare the
 %% binaries directly, with no temporary lists, normalization or locale rules.
 %% string_compare(<<"fig">>, <<"oak">>) -> -1.
@@ -167,6 +172,11 @@ string_compare(A, B) when A < B -> -1;
 string_compare(A, B) when A > B -> 1;
 string_compare(_, _) -> 0.
 
+%% Decode a trusted UTF-8 binary into Unicode code-point integers.
+%%
+%% ```erlang
+%% string_points(<<"A">>). % [65]
+%% ```
 string_points(B) -> unicode:characters_to_list(B, utf8).
 
 %% Encode a code-point list as a UTF-8 binary.
@@ -1020,3 +1030,170 @@ env_os() ->
 %% Expose the runtime system architecture as UTF-8 bytes.
 env_architecture() ->
     unicode:characters_to_binary(erlang:system_info(system_architecture)).
+
+
+%% OTP identifies extended grapheme clusters. Turn both the single-codepoint
+%% integers and multi-codepoint lists into independent UTF-8 binaries.
+%% https://www.erlang.org/doc/apps/stdlib/string.html#to_graphemes/1
+%% string_graphemes(<<"e", 16#CC, 16#81>>) -> [<<"e", 16#CC, 16#81>>].
+string_graphemes(Text) ->
+    [unicode:characters_to_binary(case G of I when is_integer(I) -> [I]; _ -> G end)
+     || G <- string:to_graphemes(Text)].
+
+%% Binary byte size intentionally differs from both code points and graphemes.
+string_byte_size(Text) -> byte_size(Text).
+
+
+%% Capture an arbitrary term behind typed, checked capabilities. Create is the
+%% Pooka constructor, so the FFI never fabricates a compiler-private class tag.
+%% Each reader validates its own shape; no atom names are created from input.
+%% dynamic_wrap(42, Create) exposes integer success and string failure.
+dynamic_wrap(Value, Create) ->
+    Create(
+        fun() -> dynamic_option(is_integer(Value), Value) end,
+        fun() -> dynamic_option(is_float(Value), Value) end,
+        fun() -> dynamic_option(valid_utf8(Value), Value) end,
+        fun() -> dynamic_option(is_boolean(Value), Value) end,
+        fun() -> dynamic_option(is_bitstring(Value), Value) end,
+        fun() ->
+            case proper_list(Value) of
+                true -> {some, [dynamic_wrap(V, Create) || V <- Value]};
+                false -> none
+            end
+        end,
+        fun(Key) ->
+            case is_map(Value) of
+                true ->
+                    case maps:find(Key, Value) of
+                        {ok, Found} -> {some, dynamic_wrap(Found, Create)};
+                        error -> none
+                    end;
+                false -> none
+            end
+        end,
+        fun(Index) ->
+            case is_tuple(Value) andalso is_integer(Index) andalso
+                 Index >= 0 andalso Index < tuple_size(Value) of
+                true -> {some, dynamic_wrap(element(Index + 1, Value), Create)};
+                false -> none
+            end
+        end,
+        fun() -> dynamic_kind(Value) end
+    ).
+
+dynamic_from_pairs(Pairs, Create) -> dynamic_wrap(maps:from_list(Pairs), Create).
+
+dynamic_option(true, Value) -> {some, Value};
+dynamic_option(false, _) -> none.
+
+%% UTF-8 validation returns neither truncated text nor an unchecked binary.
+valid_utf8(Value) when is_binary(Value) ->
+    is_list(unicode:characters_to_list(Value, utf8));
+valid_utf8(_) -> false.
+
+dynamic_kind(V) when is_integer(V) -> <<"Int">>;
+dynamic_kind(V) when is_float(V) -> <<"Float">>;
+dynamic_kind(V) when is_boolean(V) -> <<"Bool">>;
+dynamic_kind(V) when is_binary(V) ->
+    case valid_utf8(V) of true -> <<"String">>; false -> <<"BitArray">> end;
+dynamic_kind(V) when is_bitstring(V) -> <<"BitArray">>;
+dynamic_kind(V) when is_list(V) -> <<"List">>;
+dynamic_kind(V) when is_map(V) -> <<"Map">>;
+dynamic_kind(V) when is_tuple(V) -> <<"Tuple">>;
+dynamic_kind(nil) -> <<"Nil">>;
+dynamic_kind(_) -> <<"Other">>.
+
+
+%% A cons cell may have an improper tail. Check the complete spine before any
+%% traversal promises List(Dynamic) to Pooka. Each element itself stays boxed.
+proper_list([]) -> true;
+proper_list([_ | Tail]) -> proper_list(Tail);
+proper_list(_) -> false.
+
+%% OTP keeps URI syntax and component encoding rules in one place.
+%% Do not turn optional absence into an empty string: "path?" differs from "path".
+%% https://www.erlang.org/doc/apps/stdlib/uri_string.html#parse/1
+uri_parse(Text, Create) ->
+    uri_result(fun() ->
+        valid_percent_escapes(Text),
+        case uri_string:parse(Text) of
+            Map when is_map(Map) ->
+                Create(uri_option(Map, scheme), uri_option(Map, userinfo),
+                       uri_option(Map, host), uri_option(Map, port),
+                       maps:get(path, Map, <<>>), uri_option(Map, query),
+                       uri_option(Map, fragment));
+            Error -> throw(Error)
+        end
+    end).
+
+uri_option(Map, Key) ->
+    case maps:find(Key, Map) of
+        {ok, undefined} -> none;
+        {ok, Value} -> {some, Value};
+        error -> none
+    end.
+
+uri_recompose(Scheme, Userinfo, Host, Port, Path, Query, Fragment) ->
+    uri_result(fun() ->
+        Map = lists:foldl(fun
+            ({_, none}, Acc) -> Acc;
+            ({Key, {some, Value}}, Acc) -> Acc#{Key => Value}
+        end, #{path => Path}, [{scheme, Scheme}, {userinfo, Userinfo}, {host, Host},
+                              {port, Port}, {query, Query}, {fragment, Fragment}]),
+        case uri_string:recompose(Map) of
+            Value when is_binary(Value) -> Value;
+            Error -> throw(Error)
+        end
+    end).
+
+%% Quote URI components; form queries deliberately have a different space rule.
+%% https://www.erlang.org/doc/apps/stdlib/uri_string.html#quote/1
+uri_encode(Text) -> uri_string:quote(Text).
+
+uri_decode(Text) ->
+    uri_result(fun() ->
+        valid_percent_escapes(Text),
+        case uri_string:percent_decode(Text) of
+            Value when is_binary(Value) ->
+                case valid_utf8(Value) of
+                    true -> Value;
+                    false -> throw(invalid_utf8)
+                end;
+            Error -> throw(Error)
+        end
+    end).
+
+uri_query_encode(Pairs) -> unicode:characters_to_binary(uri_string:compose_query(Pairs)).
+
+uri_query_decode(Text) ->
+    uri_result(fun() ->
+        valid_percent_escapes(Text),
+        case uri_string:dissect_query(Text) of
+            Pairs when is_list(Pairs) ->
+                [{K, case V of true -> <<>>; _ -> V end} || {K, V} <- Pairs];
+            Error -> throw(Error)
+        end
+    end).
+
+%% Normalize OTP's returned error tuples and raised failures at the boundary.
+uri_result(Run) ->
+    try {ok, Run()}
+    catch
+        _:Reason -> {error, unicode:characters_to_binary(io_lib:format("~tp", [Reason]))}
+    end.
+
+
+%% OTP permits some bare percent signs. The public decoder promises complete
+%% percent triplets, so reject malformed escapes before asking OTP to decode.
+valid_percent_escapes(<<>>) -> ok;
+valid_percent_escapes(<<$%, A, B, Rest/binary>>) ->
+    case hex_digit(A) andalso hex_digit(B) of
+        true -> valid_percent_escapes(Rest);
+        false -> throw(invalid_percent_escape)
+    end;
+valid_percent_escapes(<<$%, _/binary>>) -> throw(invalid_percent_escape);
+valid_percent_escapes(<<_, Rest/binary>>) -> valid_percent_escapes(Rest).
+
+hex_digit(C) -> (C >= $0 andalso C =< $9) orelse
+                (C >= $A andalso C =< $F) orelse
+                (C >= $a andalso C =< $f).
