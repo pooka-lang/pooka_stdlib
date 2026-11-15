@@ -1,5 +1,0 @@
-name = "list_benchmark"
-version = "1.0.0"
-
-[dependencies]
-pooka_stdlib = { path = "../.." }
