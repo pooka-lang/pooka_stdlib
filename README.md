@@ -8,7 +8,7 @@
 [![Hex Docs](https://img.shields.io/website?url=https%3A%2F%2Fpooka-stdlib.hexdocs.pm%2F&style=for-the-badge&label=hex&up_message=docs&up_color=FF891F&down_message=not%20found&down_color=lightgrey)](https://pooka-stdlib.hexdocs.pm/)
 [![Tests](https://img.shields.io/github/actions/workflow/status/pooka-lang/pooka_stdlib/test.yml?style=for-the-badge&label=tests)](https://github.com/pooka-lang/pooka_stdlib/actions/workflows/test.yml)
 
-The standard library for [Pooka](https://github.com/pooka-lang/pooka), for use with Pooka 0.1.0 and Erlang/OTP 29.
+The standard library for [Pooka](https://github.com/pooka-lang/pooka), for use with Pooka 0.3.0 and Erlang/OTP 29.
 
 See the [documentation](https://pooka-stdlib.hexdocs.pm/) for the API and examples. Compiler installation and language information are in the [Pooka repository](https://github.com/pooka-lang/pooka).
 

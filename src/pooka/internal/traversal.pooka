@@ -1,0 +1,47 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// Small list walks shared by lists and dictionaries, without a module cycle.
+//// Callbacks keep their left-to-right order; accumulated results reverse once.
+
+module traversal
+
+external _Lists from erlang "lists" {
+  reverse(values: List(a)) -> List(a)
+
+  append(left: List(a), right: List(a)) -> List(a)
+}
+
+fold(values: List(a), initial: b, step: fn(b, a) -> b) -> b {
+  match values {
+    [] -> initial
+    [head, ..tail] -> fold(tail, step(initial, head), step)
+  }
+}
+
+map(values: List(a), change: fn(a) -> b) -> List(b) {
+  _Lists.reverse(fold(values, [], fn(acc, value) { [change(value), ..acc] }))
+}
+
+filter(values: List(a), keep: fn(a) -> Bool) -> List(a) {
+  _Lists.reverse(fold(values, [], fn(acc, value) {
+    match keep(value) {
+      True -> [value, ..acc]
+      False -> acc
+    }
+  }))
+}
+
+concat(left: List(a), right: List(a)) -> List(a) {
+  _Lists.append(left, right)
+}
+
+all(values: List(a), keep: fn(a) -> Bool) -> Bool {
+  match values {
+    [] -> True
+    [head, ..tail] -> keep(head) && all(tail, keep)
+  }
+}
+
+each(values: List(a), visit: fn(a) -> Nil) -> Nil {
+  fold(values, Nil, fn(_, value) { visit(value) })
+}

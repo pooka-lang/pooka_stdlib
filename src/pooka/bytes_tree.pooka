@@ -1,0 +1,98 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// Keep the pieces until somebody asks for the whole parcel.
+//// Appending makes a branch in constant time. Rendering walks an explicit work
+//// list, preserving chunk order without recursive calls down a deep left spine.
+//// Partial final bytes are preserved; this tree accepts arbitrary bitstrings.
+////
+//// ```pooka
+//// assert bytes_tree.to_bit_array(bytes_tree.from_bit_array(<<1, 2>>)) == <<1, 2>>
+//// ```
+
+module bytes_tree
+
+import pooka/list
+import pooka/bit_array
+
+external _Sizes from erlang "pooka_stdlib_ffi" {
+  quotient(a: Int, b: Int) -> Int
+}
+
+/// An immutable tree. Only the private leaf and branch classes construct its values.
+class BytesTree {}
+
+class _Empty is BytesTree {}
+
+class _Leaf(value: BitArray) is BytesTree
+
+class _Branch(left: BytesTree, right: BytesTree) is BytesTree
+
+/// Start without any chunks.
+new() -> BytesTree {
+  _Empty()
+}
+
+/// Keep a chunk without copying its contents.
+from_bit_array(value: BitArray) -> BytesTree {
+  _Leaf(value)
+}
+
+/// Attach one chunk in constant time.
+///
+/// ```pooka
+/// assert bytes_tree.to_bit_array(bytes_tree.append(bytes_tree.new(), <<1, 2>>)) == <<1, 2>>
+/// ```
+append(tree: BytesTree, value: BitArray) -> BytesTree {
+  append_tree(tree, from_bit_array(value))
+}
+
+/// Attach another tree without walking either side.
+append_tree(left: BytesTree, right: BytesTree) -> BytesTree {
+  _Branch(left, right)
+}
+
+/// Place one chunk before the earlier tree.
+prepend(tree: BytesTree, value: BitArray) -> BytesTree {
+  append_tree(from_bit_array(value), tree)
+}
+
+/// Join trees in input order without rendering their chunks.
+concat(trees: List(BytesTree)) -> BytesTree {
+  list.fold(trees, new(), append_tree)
+}
+
+/// Keep each supplied chunk as a leaf.
+from_bit_arrays(values: List(BitArray)) -> BytesTree {
+  list.fold(values, new(), append)
+}
+
+/// Render once, preserving every chunk's order.
+to_bit_array(tree: BytesTree) -> BitArray {
+  bit_array.concat(_chunks([tree], []))
+}
+
+/// Byte-oriented size rounds a partial final byte up after rendering.
+byte_size(tree: BytesTree) -> Int {
+  _Sizes.quotient(bit_size(tree) + 7, 8)
+}
+
+/// Count every bit without rendering the tree.
+bit_size(tree: BytesTree) -> Int {
+  list.fold(_chunks([tree], []), 0, fn(acc, value) {
+    acc + bit_array.bit_size(value)
+  })
+}
+
+/// Ask whether rendering would produce an empty value.
+is_empty(tree: BytesTree) -> Bool {
+  bit_size(tree) == 0
+}
+
+_chunks(pending: List(BytesTree), acc: List(BitArray)) -> List(BitArray) {
+  match pending {
+    [] -> list.reverse(acc)
+    [_Leaf(value), ..rest] -> _chunks(rest, [value, ..acc])
+    [_Branch(left, right), ..rest] -> _chunks([left, right, ..rest], acc)
+    [_Empty(), ..rest] -> _chunks(rest, acc)
+  }
+}

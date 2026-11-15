@@ -23,7 +23,7 @@ jobs:
           # elixir-version: "1"
       - uses: peregrinefinch/setup-pooka@v1
         with:
-          pooka-version: "0.1.0"
+          pooka-version: "0.3.0"
       - run: pooka deps download
       - run: pooka test
       - run: pooka format --check

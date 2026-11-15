@@ -1,0 +1,147 @@
+//// The labels on foreign parcels are suggestions. Read their actual contents.
+
+module dynamic_decode_test
+
+import pooka/dynamic
+import pooka/dynamic/decode
+import pooka/list
+
+// These external declarations deliberately simulate untrusted foreign shapes.
+// The returned values go straight into checked Dynamic capabilities.
+class _ForeignMap {}
+
+external _Maps from erlang "maps" {
+  from_list(pairs: List(#(String, a))) -> _ForeignMap
+}
+
+external _Terms from erlang "erlang" {
+  binary_to_term(bytes: BitArray) -> List(Int)
+}
+
+test "primitive readers never coerce unrelated shapes" {
+  assert decode.int().run(dynamic.from(42)) == Ok(42)
+  assert decode.int().run(dynamic.from(999999999999999999999999999999)) == Ok(
+    999999999999999999999999999999
+  )
+  assert decode.float().run(dynamic.from(1.5)) == Ok(1.5)
+  assert decode.bool().run(dynamic.from(True)) == Ok(True)
+  assert decode.string().run(dynamic.from("é🐇")) == Ok("é🐇")
+  let assert Error(errors) = decode.int().run(dynamic.from("42"))
+  let assert [error] = errors
+  assert error.path == []
+  assert error.expected == "Int"
+  assert error.found == "String"
+  assert errors == [decode.DecodeError([], "Int", "String")]
+  let assert Error(_) = decode.float().run(dynamic.from(1))
+  let assert Error(_) = decode.bool().run(dynamic.from(Nil))
+}
+
+test "malformed text remains bytes and partial bits are preserved" {
+  let invalid = dynamic.from(<<255>>)
+  let assert Error(_) = decode.string().run(invalid)
+  assert decode.bit_array().run(invalid) == Ok(<<255>>)
+  assert decode.bit_array().run(dynamic.from(<<1:size(1)>>)) == Ok(
+    <<1:size(1)>>
+  )
+  let assert Error(_) = decode.string().run(dynamic.from(<<195>>))
+}
+
+test "required and optional fields distinguish absent from invalid" {
+  let input = dynamic.from_pairs([#("age", 7)])
+  assert decode.field("age", decode.int()).run(input) == Ok(7)
+  assert decode.optional_field("missing", decode.int()).run(input) == Ok(None)
+  assert decode.optional_field("age", decode.int()).run(input) == Ok(Some(7))
+  let assert Error(errors) = decode.field("missing", decode.int()).run(input)
+  let assert [error] = errors
+  assert error.path == ["missing"]
+  assert error.found == "missing"
+  let assert Error(_) = decode.optional_field("age", decode.string()).run(input)
+  let assert Error(_) = decode.optional_field("age", decode.int()).run(
+    dynamic.from(7)
+  )
+}
+
+test "nested field and list failures carry full paths in input order" {
+  let inner = _Maps.from_list([#("ages", ["wrong", "again"])])
+  let input = dynamic.from_pairs([#("person", inner)])
+  let recipe = decode.field(
+    "person",
+    decode.field("ages", decode.list(decode.int()))
+  )
+  let assert Error(errors) = recipe.run(input)
+  assert list.map(errors, fn(error) { error.path }) == [
+    ["person", "ages", "0"],
+    ["person", "ages", "1"]
+  ]
+}
+
+test "proper lists and zero-based tuple elements decode safely" {
+  assert decode.list(decode.int()).run(dynamic.from([1, 2])) == Ok([1, 2])
+  assert decode.list(decode.int()).run(dynamic.from([])) == Ok([])
+  assert decode.element(1, decode.string()).run(dynamic.from(#(7, "oak"))) == Ok(
+    "oak"
+  )
+  let assert Error(_) = decode.element(-1, decode.int()).run(
+    dynamic.from(#(7, "oak"))
+  )
+  let assert Error(_) = decode.element(2, decode.int()).run(
+    dynamic.from(#(7, "oak"))
+  )
+  let assert Error(_) = decode.element(0, decode.int()).run(dynamic.from([7]))
+  let improper = _Terms.binary_to_term(<<131, 108, 0, 0, 0, 1, 97, 1, 97, 2>>)
+  let assert Error(_) = decode.list(decode.int()).run(dynamic.from(improper))
+}
+
+test "mapping and dependent recipes keep their result types" {
+  assert decode.int().map(fn(n) { n + 1 }).run(dynamic.from(1)) == Ok(2)
+  let recipe = decode.field("kind", decode.string()).then(fn(kind) {
+    match kind {
+      "age" -> decode.field("value", decode.int())
+      _ -> decode.failure("age kind")
+    }
+  })
+  // Binary-key fields may hold different Dynamic-free foreign types.
+  let input = _Maps.from_list([#("kind", "age"), #("value", "7")])
+  let assert Error(_) = recipe.run(dynamic.from(input))
+  assert decode.succeed(7).run(dynamic.from(Nil)) == Ok(7)
+  let assert Error(_) = decode.failure("never").run(dynamic.from(Nil))
+}
+
+test "map2 and alternatives compose without inspecting Pooka class tags" {
+  let recipe = decode.map2(
+    decode.element(0, decode.string()),
+    decode.element(1, decode.int()),
+    fn(name, age) { #(name, age) }
+  )
+  assert recipe.run(dynamic.from(#("owl", 7))) == Ok(#("owl", 7))
+  let either = decode.one_of(
+    [decode.int().map(fn(_) { "integer" }), decode.string()]
+  )
+  assert either.run(dynamic.from(7)) == Ok("integer")
+  assert either.run(dynamic.from("owl")) == Ok("owl")
+  let assert Error(errors) = either.run(dynamic.from(False))
+  assert list.length(errors) == 2
+  let assert Error(_) = decode.one_of([]).run(dynamic.from(False))
+}
+
+test "Nil is distinct from empty lists and missing fields" {
+  assert decode.nil().run(dynamic.from(Nil)) == Ok(Nil)
+  let assert Error(_) = decode.nil().run(dynamic.from([]))
+  let assert Error(_) = decode.list(decode.int()).run(dynamic.from(Nil))
+  assert decode.optional_field("value", decode.nil()).run(
+    dynamic.from_pairs([#("value", Nil)])
+  ) == Ok(Some(Nil))
+}
+
+test "list decoding visits every element once and retains all failures" {
+  let input = dynamic.from(list.range(0, 10000))
+  assert decode.list(decode.int()).run(input) == Ok(list.range(0, 10000))
+  let assert Error(errors) = decode.list(decode.int()).run(
+    dynamic.from(["bad", "bad", "bad"])
+  )
+  assert errors == [
+    decode.DecodeError(["0"], "Int", "String"),
+    decode.DecodeError(["1"], "Int", "String"),
+    decode.DecodeError(["2"], "Int", "String")
+  ]
+}

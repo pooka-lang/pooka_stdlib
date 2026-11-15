@@ -2,11 +2,22 @@
 
 All notable changes to the Pooka standard library are documented in this file.
 
-## Unreleased
+## 0.3.0
 
 ### Added
 
+- Result collection, flattening, recovery and ordered partitioning; matching Option collection, flattening and lazy alternatives.
+- List prefix operations, fixed-size and key-based chunking, grouping, early-stopping folds and reduction; dictionary conflict resolution, selection, dropping and iteration.
+- Code-point padding and prefix/suffix removal, explicit UTF-8 byte counts and grapheme-aware splitting, counting, slicing and reversal.
+- Immutable `StringTree` and `BytesTree` builders with constant-time appends and iterative rendering. Byte trees also preserve non-byte-aligned bitstrings.
+- Checked `Dynamic` capabilities and composable decoders with nested field/index error paths, optional fields, alternatives and record-building helpers.
+- Typed URI parsing and recomposition, strict percent encoding/decoding and ordered form query helpers through OTP.
+
 - Compare strings in Unicode code point order with `string.compare`, including stable sorting by string fields (#5).
+
+### Removed
+
+- Remove the benchmark project and keep application examples outside the library repository.
 
 ## 0.2.0
 

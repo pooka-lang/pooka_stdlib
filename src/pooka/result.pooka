@@ -14,6 +14,8 @@
 
 module result
 
+import pooka/list
+
 /// Transform the carried value; an absent or failed branch passes through
 /// unchanged.
 ///
@@ -122,4 +124,67 @@ to_option(value: Result(a, e)) -> Option(a) {
     Ok(x) -> Some(x)
     Error(_) -> None
   }
+}
+
+/// Open every successful envelope, stopping at the first error.
+///
+/// ```pooka
+/// assert result.all([Ok(1), Ok(2)]) == Ok([1, 2])
+/// ```
+all(values: List(Result(a, e))) -> Result(List(a), e) {
+  _all(values, [])
+}
+
+_all(values, acc) {
+  match values {
+    [] -> Ok(list.reverse(acc))
+    [Ok(value), ..rest] -> _all(rest, list.prepend(acc, value))
+    [Error(error), .._rest] -> Error(error)
+  }
+}
+
+/// Remove one layer of wrapping; either error keeps its explanation.
+///
+/// ```pooka
+/// assert result.flatten(Ok(Ok(1))) == Ok(1)
+/// ```
+flatten(value: Result(Result(a, e), e)) -> Result(a, e) {
+  flat_map(value, fn(inner) { inner })
+}
+
+/// Ask the fallback only after failure. It may change the error type.
+///
+/// ```pooka
+/// assert result.recover(Error("missing"), fn(_) { Ok(1) }) == Ok(1)
+/// ```
+recover(value: Result(a, e), fallback: fn(e) -> Result(a, f)) -> Result(a, f) {
+  match value {
+    Ok(found) -> Ok(found)
+    Error(error) -> fallback(error)
+  }
+}
+
+/// Separate successes and errors, preserving their input order.
+///
+/// ```pooka
+/// assert result.partition([Ok(1), Error("no")]) == #([1], ["no"])
+/// ```
+partition(values: List(Result(a, e))) -> #(List(a), List(e)) {
+  let #(yes, no) = list.fold(values, #([], []), fn(acc, value) {
+    let #(yes, no) = acc
+    match value {
+      Ok(found) -> #(list.prepend(yes, found), no)
+      Error(error) -> #(yes, list.prepend(no, error))
+    }
+  })
+  #(list.reverse(yes), list.reverse(no))
+}
+
+/// Keep successful values in order, deliberately leaving errors behind.
+///
+/// ```pooka
+/// assert result.values([Ok(1), Error("no"), Ok(2)]) == [1, 2]
+/// ```
+values(items: List(Result(a, e))) -> List(a) {
+  list.filter_map(items, to_option)
 }

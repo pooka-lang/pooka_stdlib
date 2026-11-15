@@ -15,7 +15,7 @@
 
 module dict
 
-import pooka/list
+import pooka/internal/traversal as list
 import pooka/internal/map.{Storage}
 
 /// An immutable key/value cabinet backed by typed native-map capabilities.
@@ -129,7 +129,7 @@ class Dict(k, v) {
   ///
   /// ```pooka
   /// import pooka/dict
-  /// import pooka/list
+  /// import pooka/internal/traversal as list
   ///
   /// assert list.contains(dict.from_list([#("oak", 1)]).keys(), "oak")
   /// ```
@@ -144,7 +144,7 @@ class Dict(k, v) {
   ///
   /// ```pooka
   /// import pooka/dict
-  /// import pooka/list
+  /// import pooka/internal/traversal as list
   ///
   /// assert list.contains(dict.from_list([#("oak", 1)]).values(), 1)
   /// ```
@@ -159,7 +159,7 @@ class Dict(k, v) {
   ///
   /// ```pooka
   /// import pooka/dict
-  /// import pooka/list
+  /// import pooka/internal/traversal as list
   ///
   /// assert list.contains(dict.from_list([#("oak", 1)]).to_list(), #("oak", 1))
   /// ```
@@ -238,6 +238,56 @@ class Dict(k, v) {
     _storage.pairs()
     |> list.concat(right.to_list())
     |> from_list()
+  }
+
+  /// Merge both cabinets, asking the callback only for shared keys.
+  ///
+  /// ```pooka
+  /// assert dict.from_list([#("a", 1)]).combine(dict.from_list([#("a", 2)]), fn(_, a, b) { a + b }).get("a") == Some(3)
+  /// ```
+  combine(right: Dict(k, v), resolve: fn(k, v, v) -> v) -> Dict(k, v) {
+    list.fold(right.to_list(), Dict(_storage), fn(acc, pair) {
+      let #(key, value) = pair
+      acc.insert(key, match get(key) {
+        None -> value
+        Some(left) -> resolve(key, left, value)
+      })
+    })
+  }
+
+  /// Keep only requested keys; missing and repeated keys are harmless.
+  ///
+  /// ```pooka
+  /// assert dict.from_list([#("a", 1)]).take(["a", "missing"]).size() == 1
+  /// ```
+  take(keys: List(k)) -> Dict(k, v) {
+    list.fold(keys, empty(), fn(acc, key) {
+      match get(key) {
+        None -> acc
+        Some(value) -> acc.insert(key, value)
+      }
+    })
+  }
+
+  /// Remove requested keys, leaving the original dictionary intact.
+  ///
+  /// ```pooka
+  /// assert dict.from_list([#("a", 1)]).drop(["a"]).is_empty()
+  /// ```
+  drop(keys: List(k)) -> Dict(k, v) {
+    list.fold(keys, Dict(_storage), fn(acc, key) { acc.delete(key) })
+  }
+
+  /// Visit every pair once. Dictionary iteration order is unspecified.
+  ///
+  /// ```pooka
+  /// dict.from_list([#("a", 1)]).each(fn(_, value) { assert value == 1 })
+  /// ```
+  each(visit: fn(k, v) -> Nil) -> Nil {
+    list.each(to_list(), fn(pair) {
+      let #(key, value) = pair
+      visit(key, value)
+    })
   }
 }
 

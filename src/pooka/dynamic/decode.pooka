@@ -1,0 +1,269 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//// Read the label, check the contents, and keep the address of any mistake.
+//// A Decoder is a typed recipe over Dynamic. Errors carry paths from outermost
+//// field to innermost index. Primitives never coerce strings to numbers, integer
+//// values to floats, or arbitrary bytes to UTF-8. List decoding collects all bad
+//// elements; field composition and then stop at the first failed step.
+////
+//// ```pooka
+//// let recipe = decode.field("age", decode.int())
+//// assert recipe.run(dynamic.from_pairs([#("age", 7)])) == Ok(7)
+//// ```
+
+module decode
+
+import pooka/dynamic.{Dynamic}
+import pooka/list as lists
+import pooka/int as integers
+
+/// Where a value disagreed with the recipe, and the two runtime shapes involved.
+class DecodeError(path: List(String), expected: String, found: String)
+
+/// A reusable recipe. The function remains private; run checks one input.
+class Decoder(a) {
+  let _read: fn(Dynamic) -> Result(a, List(DecodeError))
+
+  new(read: fn(Dynamic) -> Result(a, List(DecodeError))) {
+    self._read = read
+  }
+
+  /// Decode one input, retaining the structured failures.
+  run(value: Dynamic) -> Result(a, List(DecodeError)) {
+    _read(value)
+  }
+
+  /// Transform a decoded value without rereading the foreign term.
+  ///
+  /// ```pooka
+  /// assert decode.int().map(fn(n) { n + 1 }).run(dynamic.from(1)) == Ok(2)
+  /// ```
+  map(change: fn(a) -> b) -> Decoder(b) {
+    Decoder(fn(value) {
+      let found = _read(value)?
+      Ok(change(found))
+    })
+  }
+
+  /// Select the next recipe from a decoded value, then read the same input.
+  ///
+  /// ```pooka
+  /// let recipe = decode.field("kind", decode.string()).then(fn(kind) {
+  ///   match kind { "age" -> decode.field("value", decode.int()) _ -> decode.failure("age kind") }
+  /// })
+  /// ```
+  then(next: fn(a) -> Decoder(b)) -> Decoder(b) {
+    Decoder(fn(value) {
+      let found = _read(value)?
+      next(found).run(value)
+    })
+  }
+}
+
+_error(value: Dynamic, expected: String) -> Result(a, List(DecodeError)) {
+  Error([DecodeError([], expected, value.kind())])
+}
+
+/// Read a BEAM integer, including values beyond machine-word precision.
+int() -> Decoder(Int) {
+  Decoder(fn(value) {
+    match value.as_int() {
+      Some(n) -> Ok(n)
+      None -> _error(value, "Int")
+    }
+  })
+}
+
+/// Read an actual BEAM float. Integers require an explicit conversion.
+float() -> Decoder(Float) {
+  Decoder(fn(value) {
+    match value.as_float() {
+      Some(n) -> Ok(n)
+      None -> _error(value, "Float")
+    }
+  })
+}
+
+/// Read only valid UTF-8 binaries; malformed text remains an error.
+string() -> Decoder(String) {
+  Decoder(fn(value) {
+    match value.as_string() {
+      Some(n) -> Ok(n)
+      None -> _error(value, "String")
+    }
+  })
+}
+
+/// Read the two boolean atoms, without treating other atoms as booleans.
+bool() -> Decoder(Bool) {
+  Decoder(fn(value) {
+    match value.as_bool() {
+      Some(n) -> Ok(n)
+      None -> _error(value, "Bool")
+    }
+  })
+}
+
+/// Read any bitstring, including a non-byte-aligned suffix.
+bit_array() -> Decoder(BitArray) {
+  Decoder(fn(value) {
+    match value.as_bits() {
+      Some(n) -> Ok(n)
+      None -> _error(value, "BitArray")
+    }
+  })
+}
+
+/// Return a known value without inspecting the input.
+succeed(value: a) -> Decoder(a) {
+  Decoder(fn(_) { Ok(value) })
+}
+
+/// Reject the input with an application-defined expectation.
+failure(expected: String) -> Decoder(a) {
+  Decoder(fn(value) { _error(value, expected) })
+}
+
+_at(value: Result(a, List(DecodeError)), segment: String) -> Result(
+  a,
+  List(DecodeError)
+) {
+  match value {
+    Ok(found) -> Ok(found)
+    Error(errors) -> Error(lists.map(errors, fn(error) {
+      DecodeError([segment, ..error.path], error.expected, error.found)
+    }))
+  }
+}
+
+/// Read a required binary-key map field and prefix any failure with its name.
+///
+/// ```pooka
+/// assert decode.field("age", decode.int()).run(dynamic.from_pairs([#("age", 7)])) == Ok(7)
+/// ```
+field(name: String, decoder: Decoder(a)) -> Decoder(a) {
+  Decoder(fn(value) {
+    match value.kind() == "Map" {
+      False -> _error(value, "Map")
+      True -> match value.field(name) {
+        None -> Error([DecodeError([name], "present field", "missing")])
+        Some(found) -> _at(decoder.run(found), name)
+      }
+    }
+  })
+}
+
+/// Missing fields become None; present invalid values still report an error.
+optional_field(name: String, decoder: Decoder(a)) -> Decoder(Option(a)) {
+  Decoder(fn(value) {
+    match value.kind() == "Map" {
+      False -> _error(value, "Map")
+      True -> match value.field(name) {
+        None -> Ok(None)
+        Some(found) -> {
+          let answer = _at(decoder.run(found), name)?
+          Ok(Some(answer))
+        }
+      }
+    }
+  })
+}
+
+/// Read a zero-based tuple element. Lists use the list decoder instead.
+element(index: Int, decoder: Decoder(a)) -> Decoder(a) {
+  Decoder(fn(value) {
+    match value.kind() == "Tuple" {
+      False -> _error(value, "Tuple")
+      True -> match value.element(index) {
+        None -> Error(
+          [DecodeError([integers.to_string(index)], "tuple element", "missing")]
+        )
+        Some(found) -> _at(decoder.run(found), integers.to_string(index))
+      }
+    }
+  })
+}
+
+/// Decode every proper-list element, collecting errors in input order.
+list(decoder: Decoder(a)) -> Decoder(List(a)) {
+  Decoder(fn(value) {
+    match value.as_list() {
+      None -> _error(value, "List")
+      Some(values) -> {
+        let #(answers, errors) = lists.index_fold(
+          values,
+          #([], []),
+          fn(acc, item, index) {
+            let #(answers, errors) = acc
+            match _at(decoder.run(item), integers.to_string(index)) {
+              Ok(answer) -> #([answer, ..answers], errors)
+              Error(found) -> #(
+                answers,
+                lists.fold(found, errors, fn(acc, error) { [error, ..acc] })
+              )
+            }
+          }
+        )
+        match errors {
+          [] -> Ok(lists.reverse(answers))
+          _ -> Error(lists.reverse(errors))
+        }
+      }
+    }
+  })
+}
+
+/// Try alternatives in order. Keep all explanations when none succeeds.
+one_of(decoders: List(Decoder(a))) -> Decoder(a) {
+  Decoder(fn(value) { _alternatives(decoders, value, []) })
+}
+
+_alternatives(
+  decoders: List(Decoder(a)),
+  value: Dynamic,
+  errors: List(DecodeError)
+) -> Result(a, List(DecodeError)) {
+  match decoders {
+    [] -> match errors {
+      [] -> _error(value, "at least one alternative")
+      _ -> Error(lists.reverse(errors))
+    }
+    [head, ..tail] -> match head.run(value) {
+      Ok(found) -> Ok(found)
+      Error(found) -> _alternatives(
+        tail,
+        value,
+        lists.fold(found, errors, fn(acc, error) { [error, ..acc] })
+      )
+    }
+  }
+}
+
+/// Read two recipes from one input, then combine their successful values.
+///
+/// ```pooka
+/// let pair = decode.map2(decode.field("name", decode.string()), decode.field("age", decode.int()), fn(name, age) { #(name, age) })
+/// ```
+map2(first: Decoder(a), second: Decoder(b), combine: fn(a, b) -> c) -> Decoder(
+  c
+) {
+  Decoder(fn(value) {
+    let a = first.run(value)?
+    let b = second.run(value)?
+    Ok(combine(a, b))
+  })
+}
+
+/// Read the Nil atom. Empty lists and absent fields remain different values.
+///
+/// ```pooka
+/// assert decode.nil().run(dynamic.from(Nil)) == Ok(Nil)
+/// ```
+nil() -> Decoder(Nil) {
+  Decoder(fn(value) {
+    match value.kind() == "Nil" {
+      True -> Ok(Nil)
+      False -> _error(value, "Nil")
+    }
+  })
+}

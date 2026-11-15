@@ -1,0 +1,119 @@
+//// Stop the walk at the first closed gate, and keep the old cabinet intact.
+
+module collection_extensions_test
+
+import pooka/list
+import pooka/dict
+import pooka/int
+
+test "prefix operations stop calling after the first rejection" {
+  let predicate = fn(n) {
+    assert n != 99
+    n > 0
+  }
+  assert list.take_while([1, 2, 0, 99], predicate) == [1, 2]
+  assert list.drop_while([1, 2, 0, 99], predicate) == [0, 99]
+  assert list.take_while([], predicate) == []
+  assert list.drop_while([], predicate) == []
+  assert list.take_while([1, 2], predicate) == [1, 2]
+  assert list.drop_while([1, 2], predicate) == []
+}
+
+test "chunk handles empty nonpositive and oversized widths" {
+  assert list.chunk([], 2) == []
+  assert list.chunk([1, 2], 0) == []
+  assert list.chunk([1, 2], -1) == []
+  assert list.chunk([1, 2, 3], 1) == [[1], [2], [3]]
+  assert list.chunk([1, 2, 3, 4, 5], 2) == [[1, 2], [3, 4], [5]]
+  assert list.chunk([1, 2], 20) == [[1, 2]]
+}
+
+test "group keeps original order inside each key" {
+  let groups = list.group([1, 2, 3, 4, 5], int.is_even)
+  assert groups.get(True) == Some([2, 4])
+  assert groups.get(False) == Some([1, 3, 5])
+  assert list.group([], fn(n: Int) { n }).is_empty()
+  assert list.group([1, 1, 1], fn(_) { "all" }).get("all") == Some([1, 1, 1])
+}
+
+test "fold until preserves the stopped accumulator" {
+  assert list.fold_until([1, 2, 99], 0, fn(acc, n) {
+    assert n != 99
+    match n == 2 {
+      True -> list.Stop(acc + n)
+      False -> list.Continue(acc + n)
+    }
+  }) == 3
+  assert list.fold_until([], 7, fn(_, _) { panic as "empty fold" }) == 7
+  assert list.fold_until([1, 2], 0, fn(acc, n) { list.FoldStep(acc + n) }) == 3
+}
+
+test "reduce distinguishes empty input and respects order" {
+  assert list.reduce([], fn(a: Int, b) { a + b }) == None
+  assert list.reduce([7], fn(_, _) { panic as "singleton reduce" }) == Some(7)
+  assert list.reduce([10, 3, 2], fn(a, b) { a - b }) == Some(5)
+}
+
+test "combine calls the resolver only for overlapping keys" {
+  let left = dict.from_list([#("shared", 10), #("left", 1)])
+  let right = dict.from_list([#("shared", 20), #("right", 2)])
+  let combined = left.combine(right, fn(key, a, b) {
+    assert key == "shared"
+    a - b
+  })
+  assert combined.get("shared") == Some(-10)
+  assert combined.get("left") == Some(1)
+  assert combined.get("right") == Some(2)
+  assert left.get("shared") == Some(10)
+  assert right.get("shared") == Some(20)
+  assert left.combine(dict.empty(), fn(_, _, _) { panic as "no collision" }).equals(
+    left
+  )
+}
+
+test "take drop and each preserve dictionary semantics" {
+  let values = dict.from_list([#("a", 1), #("b", 2)])
+  assert values.take(["a", "a", "absent"]).equals(dict.from_list([#("a", 1)]))
+  assert values.take([]).is_empty()
+  assert values.drop(["a", "a", "absent"]).equals(dict.from_list([#("b", 2)]))
+  assert values.drop([]).equals(values)
+  assert values.size() == 2
+  values.each(fn(key, value) { assert values.get(key) == Some(value) })
+  dict.empty().each(fn(_, _) { panic as "empty each" })
+}
+
+test "chunking then flattening is an identity across widths" {
+  let values = list.range(0, 1000)
+  list.each(list.range(1, 50), fn(size) {
+    let chunks = list.chunk(values, size)
+    assert list.flatten(chunks) == values
+    assert list.all(chunks, fn(chunk) {
+      list.length(chunk) > 0 && list.length(chunk) <= size
+    })
+  })
+}
+
+actor KeyVisits {
+  var values: List(Int) = []
+
+  be note(value: Int) {
+    values = [value, ..values]
+  }
+
+  read() -> List(Int) {
+    list.reverse(values)
+  }
+}
+
+test "chunk by keeps consecutive runs and calls the key once per value" {
+  let visits = KeyVisits()
+  assert list.chunk_by([1, 3, 2, 4, 5], fn(value) {
+    visits.note(value)
+    int.is_even(value)
+  }) == [[1, 3], [2, 4], [5]]
+  assert visits.read() == [1, 3, 2, 4, 5]
+  assert list.chunk_by([], fn(n: Int) { n }) == []
+  assert list.chunk_by([1, 3, 2, 4, 5], int.is_even) == [[1, 3], [2, 4], [5]]
+  assert list.chunk_by([1], int.is_even) == [[1]]
+  assert list.chunk_by([1, 2, 3], fn(_) { 0 }) == [[1, 2, 3]]
+}

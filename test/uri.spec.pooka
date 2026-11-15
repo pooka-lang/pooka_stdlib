@@ -1,0 +1,70 @@
+//// Keep a query's plus sign separate from a path's literal plus sign.
+
+module uri_test
+
+import pooka/uri
+import pooka/list
+
+test "absolute URIs retain every optional component" {
+  let text = "https://reader@example.com:8443/tea?q=oak#leaf"
+  let assert Ok(value) = uri.parse(text)
+  assert value.scheme == Some("https")
+  assert value.userinfo == Some("reader")
+  assert value.host == Some("example.com")
+  assert value.port == Some(8443)
+  assert value.path == "/tea"
+  assert value.query == Some("q=oak")
+  assert value.fragment == Some("leaf")
+  assert value.to_string() == Ok(text)
+}
+
+test "relative references and present empty components round trip" {
+  list.each(
+    ["", "../oak", "/tea?", "#", "//example.com/path", "https://[::1]:8080/"],
+    fn(text) {
+      let assert Ok(value) = uri.parse(text)
+      assert value.to_string() == Ok(text)
+    }
+  )
+  let assert Ok(value) = uri.parse("/tea?")
+  assert value.scheme == None
+  assert value.query == Some("")
+  assert value.fragment == None
+}
+
+test "malformed URI syntax returns errors" {
+  let assert Error(_) = uri.parse("https://[broken/path")
+  let assert Error(_) = uri.parse("https://example.com:port/")
+  let assert Error(_) = uri.parse("/bad%GG")
+}
+
+test "component escaping preserves Unicode and literal plus" {
+  assert uri.percent_encode("a +/é") == "a%20%2B%2F%C3%A9"
+  assert uri.percent_decode("a%20%2B%2F%C3%A9") == Ok("a +/é")
+  assert uri.percent_decode("a+b") == Ok("a+b")
+  let assert Error(_) = uri.percent_decode("%")
+  let assert Error(_) = uri.percent_decode("%GG")
+  let assert Error(_) = uri.percent_decode("%FF")
+}
+
+test "form query pairs retain duplicates ordering and empty values" {
+  let pairs = [#("q", "oak tree"), #("q", "é+🐇"), #("empty", "")]
+  let text = uri.compose_query(pairs)
+  assert uri.dissect_query(text) == Ok(pairs)
+  assert uri.compose_query([]) == ""
+  assert uri.dissect_query("") == Ok([])
+  assert uri.dissect_query("a+b=c+d&bare&empty=") == Ok(
+    [#("a b", "c d"), #("bare", ""), #("empty", "")]
+  )
+  let assert Error(_) = uri.dissect_query("q=%FF")
+  let assert Error(_) = uri.dissect_query("q=%GG")
+}
+
+test "component encoding round trips diverse valid text" {
+  list.each(["", "oak", "é🐇", "é", "a+b /?#&=", "\u{0}"], fn(text) {
+    assert uri.percent_decode(uri.percent_encode(text)) == Ok(text)
+    assert uri.dissect_query(uri.compose_query([#(text, text)])) == Ok(
+      [#(text, text)]
+    )
+  })
+}

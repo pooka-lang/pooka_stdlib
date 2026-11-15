@@ -14,6 +14,8 @@
 
 module option
 
+import pooka/list
+
 /// Transform the carried value; an absent or failed branch passes through
 /// unchanged.
 ///
@@ -108,4 +110,51 @@ to_result(value: Option(a), error: e) -> Result(a, e) {
     Some(x) -> Ok(x)
     None -> Error(error)
   }
+}
+
+/// Open every envelope; one absence makes the whole answer absent.
+///
+/// ```pooka
+/// assert option.all([Some(1), Some(2)]) == Some([1, 2])
+/// ```
+all(values: List(Option(a))) -> Option(List(a)) {
+  _all(values, [])
+}
+
+_all(values, acc) {
+  match values {
+    [] -> Some(list.reverse(acc))
+    [Some(value), ..rest] -> _all(rest, list.prepend(acc, value))
+    [None, .._rest] -> None
+  }
+}
+
+/// Remove one optional layer without inventing a missing value.
+///
+/// ```pooka
+/// assert option.flatten(Some(Some(1))) == Some(1)
+/// ```
+flatten(value: Option(Option(a))) -> Option(a) {
+  flat_map(value, fn(inner) { inner })
+}
+
+/// Ask for another envelope only when the first one is empty.
+///
+/// ```pooka
+/// assert option.or_else(None, fn() { Some(1) }) == Some(1)
+/// ```
+or_else(value: Option(a), fallback: fn() -> Option(a)) -> Option(a) {
+  match value {
+    Some(found) -> Some(found)
+    None -> fallback()
+  }
+}
+
+/// Keep present values in their original order.
+///
+/// ```pooka
+/// assert option.values([Some(1), None, Some(2)]) == [1, 2]
+/// ```
+values(items: List(Option(a))) -> List(a) {
+  list.filter_map(items, fn(value) { value })
 }
