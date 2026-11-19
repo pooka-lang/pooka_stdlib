@@ -6,6 +6,8 @@ All notable changes to the Pooka standard library are documented in this file.
 
 ### Fixed
 
+- Read files and inspect metadata directly in the calling process, avoiding the shared OTP file-server queue and unnecessary local-time conversions (#8).
+
 - Remove matching string prefixes and suffixes without scanning the remaining text (#9).
 
 ## 0.3.1
