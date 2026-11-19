@@ -101,3 +101,16 @@ test "recursive directory creation rejects regular files" {
   let assert Error(file.FileError(_, _)) = file.create_directory(name)
   assert file.delete(name) == Ok(Nil)
 }
+
+test "raw reads retain relative paths and Unicode names" {
+  let name = "build/pooka-file-α🐇.txt"
+  assert file.write(name, "é🐇") == Ok(Nil)
+  assert file.read(name) == Ok("é🐇")
+  assert file.read_bytes(name) == Ok(<<"é🐇":utf8>>)
+  assert file.exists(name) == Ok(True)
+  assert file.is_file(name) == Ok(True)
+  assert file.is_directory(name) == Ok(False)
+  assert file.exists(name + "/missing") == Ok(False)
+  assert file.delete(name) == Ok(Nil)
+  assert file.exists(name) == Ok(False)
+}

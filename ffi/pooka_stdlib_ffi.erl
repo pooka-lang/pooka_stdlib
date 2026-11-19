@@ -479,16 +479,17 @@ read_io(Read) ->
 %% completed before it returns.
 io_flush() -> io_print(<<>>, false).
 
-%% Read a file and validate UTF-8 before exposing it as Pooka String.
+%% Read directly in the caller, then validate UTF-8 before offering a String.
+%% The raw option avoids queuing independent readers behind the file server.
 file_read(P) ->
-    case file:read_file(P) of
+    case file:read_file(P, [raw]) of
         {ok, B} -> utf8(B);
         {error, R} -> {error, reason(R)}
     end.
 
 %% Read the original file bytes without a text-decoding promise.
 file_read_bytes(P) ->
-    case file:read_file(P) of
+    case file:read_file(P, [raw]) of
         {ok, B} -> {ok, B};
         {error, R} -> {error, reason(R)}
     end.
@@ -514,10 +515,11 @@ file_write(P, B, Append) when is_binary(B) ->
 file_write(_, _, _) ->
     {error, <<"expected whole bytes">>}.
 
+%% Metadata needs no local-time conversion; raw keeps the work in the caller.
 %% Classify a path. Missing entries and non-directory parents yield false; other failures
 %% remain errors.
 file_predicate(P, Kind) ->
-    case file:read_file_info(P) of
+    case file:read_file_info(P, [raw, {time, posix}]) of
         {ok, #file_info{type = T}} ->
             {ok,
                 case Kind of
@@ -575,7 +577,8 @@ file_copy(A, B) ->
 file_rename(A, B) -> unit(file:rename(A, B)).
 
 %% List directory entries as UTF-8 binaries, preserving the runtime's unspecified
-%% enumeration order.
+%% enumeration order. file:list_dir/1 has no raw option; keep its documented
+%% filename handling rather than depend on the private prim_file API.
 file_list(P) ->
     case file:list_dir(P) of
         {ok, Names} -> {ok, [unicode:characters_to_binary(N) || N <- Names]};
