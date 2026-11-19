@@ -43,6 +43,10 @@ external _Text from erlang "pooka_stdlib_ffi" {
 
   string_ends(text: String, suffix: String) -> Bool
 
+  string_remove_prefix(text: String, prefix: String) -> String
+
+  string_remove_suffix(text: String, suffix: String) -> String
+
   string_replace(text: String, old: String, replacement: String) -> String
 
   string_trim(text: String, direction: Int) -> String
@@ -328,10 +332,7 @@ byte_size(text: String) -> Int {
 /// assert string.remove_prefix("moonlight", "moon") == "light"
 /// ```
 remove_prefix(text: String, prefix: String) -> String {
-  match starts_with(text, prefix) {
-    True -> drop_start(text, length(prefix))
-    False -> text
-  }
+  _Text.string_remove_prefix(text, prefix)
 }
 
 /// Remove one matching suffix, including an empty suffix harmlessly.
@@ -340,10 +341,7 @@ remove_prefix(text: String, prefix: String) -> String {
 /// assert string.remove_suffix("moonlight", "light") == "moon"
 /// ```
 remove_suffix(text: String, suffix: String) -> String {
-  match ends_with(text, suffix) {
-    True -> drop_end(text, length(suffix))
-    False -> text
-  }
+  _Text.string_remove_suffix(text, suffix)
 }
 
 /// Pad to a code point width, cycling and truncating the supplied padding.

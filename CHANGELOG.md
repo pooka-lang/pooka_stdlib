@@ -2,6 +2,12 @@
 
 All notable changes to the Pooka standard library are documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- Remove matching string prefixes and suffixes without scanning the remaining text (#9).
+
 ## 0.3.1
 
 ### Documentation

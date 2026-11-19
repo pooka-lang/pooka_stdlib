@@ -49,6 +49,8 @@
     string_contains/2,
     string_starts/2,
     string_ends/2,
+    string_remove_prefix/2,
+    string_remove_suffix/2,
     string_replace/3,
     string_trim/2,
     string_upper/1,
@@ -211,6 +213,23 @@ string_starts(B, S) ->
 string_ends(B, S) ->
     byte_size(S) =< byte_size(B) andalso
         binary:part(B, byte_size(B) - byte_size(S), byte_size(S)) =:= S.
+
+%% A complete UTF-8 prefix leaves a complete UTF-8 tail. Count its bytes once;
+%% the rest of the string need not make a journey through a code-point list.
+string_remove_prefix(B, S) ->
+    Size = byte_size(S),
+    case B of
+        <<S:Size/binary, Rest/binary>> -> Rest;
+        _ -> B
+    end.
+
+%% The matching suffix supplies the boundary, even when a letter has several bytes.
+string_remove_suffix(B, S) ->
+    Size = byte_size(B) - byte_size(S),
+    case B of
+        <<Rest:Size/binary, S/binary>> when Size >= 0 -> Rest;
+        _ -> B
+    end.
 
 %% Replace all occurrences of a nonempty search binary. Empty search leaves the text
 %% unchanged.

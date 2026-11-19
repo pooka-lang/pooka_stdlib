@@ -28,6 +28,25 @@ test "prefix and suffix removal changes only a complete match" {
   assert string.remove_suffix("é🐇", "🐇") == "é"
 }
 
+test "affixes keep Unicode boundaries and remove just one occurrence" {
+  assert string.remove_prefix("é🐇é", "é") == "🐇é"
+  assert string.remove_suffix("é🐇é", "é") == "é🐇"
+  assert string.remove_prefix("éoak", "é") == "oak"
+  assert string.remove_suffix("oaké", "é") == "oak"
+  assert string.remove_prefix("éoak", "é") == "éoak"
+  assert string.remove_suffix("oaké", "é") == "oaké"
+  assert string.remove_prefix("ooo", "o") == "oo"
+  assert string.remove_suffix("ooo", "o") == "oo"
+  assert string.remove_prefix("", "x") == ""
+  assert string.remove_suffix("", "x") == ""
+  assert string.remove_prefix("", "") == ""
+  assert string.remove_suffix("", "") == ""
+  assert string.remove_suffix("oak", "oak") == ""
+  let long = string.repeat("é🐇", 10000)
+  assert string.remove_prefix("x" + long, "x") == long
+  assert string.remove_suffix(long + "x", "x") == long
+}
+
 test "code points bytes and graphemes remain distinct" {
   assert string.length("é") == 2
   assert string.byte_size("é") == 3
