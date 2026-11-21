@@ -9,7 +9,7 @@
 //// ```pooka
 //// import pooka/io
 ////
-//// let assert Ok(_) = io.println("Good evening")
+//// io.println("Good evening")
 //// ```
 
 module io
@@ -42,48 +42,61 @@ _error(value: Result(a, String)) -> Result(a, IoError) {
   }
 }
 
-/// Write text to stdout without adding a newline.
+/// Write text to stdout without adding a newline. Use try_print to inspect
+/// a write failure.
 ///
 /// ```pooka
 /// import pooka/io
 ///
-/// let assert Ok(_) = io.print("oak")
+/// io.print("oak")
 /// ```
-print(text: String) -> Result(Nil, IoError) {
-  _error(_Stdio.io_print(text, False))
+print(text: String) -> Nil {
+  let _ = try_print(text)
+  Nil
 }
 
 /// Write text to stdout followed by a newline.
 ///
 /// ```pooka
-/// import pooka/io
-///
-/// let assert Ok(_) = io.println("oak")
+/// io.println("oak")
 /// ```
-println(text: String) -> Result(Nil, IoError) {
+println(text: String) -> Nil {
   print(text + "\n")
 }
 
-/// Write text to standard_error without adding a newline.
+/// Write text to stderr without adding a newline.
+eprint(text: String) -> Nil {
+  let _ = try_eprint(text)
+  Nil
+}
+
+/// Write text to stderr followed by a newline.
+eprintln(text: String) -> Nil {
+  eprint(text + "\n")
+}
+
+/// Write text to stdout and return any error from the output device.
+try_print(text: String) -> Result(Nil, IoError) {
+  _error(_Stdio.io_print(text, False))
+}
+
+/// Write a line to stdout and return any error from the output device.
 ///
 /// ```pooka
-/// import pooka/io
-///
-/// let assert Ok(_) = io.eprint("missing file")
+/// let assert Ok(_) = io.try_println("oak")
 /// ```
-eprint(text: String) -> Result(Nil, IoError) {
+try_println(text: String) -> Result(Nil, IoError) {
+  try_print(text + "\n")
+}
+
+/// Write text to stderr and return any error from the output device.
+try_eprint(text: String) -> Result(Nil, IoError) {
   _error(_Stdio.io_print(text, True))
 }
 
-/// Write text to standard_error followed by a newline.
-///
-/// ```pooka
-/// import pooka/io
-///
-/// let assert Ok(_) = io.eprintln("missing file")
-/// ```
-eprintln(text: String) -> Result(Nil, IoError) {
-  eprint(text + "\n")
+/// Write a line to stderr and return any error from the output device.
+try_eprintln(text: String) -> Result(Nil, IoError) {
+  try_eprint(text + "\n")
 }
 
 /// Read one line with its terminator. EOF is Ok(None), not an empty line.
@@ -105,7 +118,7 @@ read_line() -> Result(Option(String), IoError) {
 /// let assert Ok(answer) = io.prompt("Name: ")
 /// ```
 prompt(text: String) -> Result(Option(String), IoError) {
-  print(text)?
+  try_print(text)?
   read_line()
 }
 

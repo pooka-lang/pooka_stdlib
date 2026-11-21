@@ -4,6 +4,10 @@ All notable changes to the Pooka standard library are documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- Return `Nil` from `io.print`, `io.println`, `io.eprint`, and `io.eprintln`. Use the corresponding `try_*` function to handle an output failure.
+
 ### Fixed
 
 - Store the native Erlang map directly in each dictionary so updates no longer allocate four closures and a storage wrapper. Lookups call the map bridge directly, and equality compares entries regardless of construction path (#12).

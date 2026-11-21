@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: Apache-2.0
+module io_test
+
+import pooka/io
+
+external _Probe from erlang "io_probe" {
+  capture(fail: Bool, work: fn() -> a) -> #(a, String)
+}
+
+test "plain stdout writes return Nil and keep their newline behaviour" {
+  let print_line: fn(String) -> Nil = io.println
+  let #(value, text) = _Probe.capture(False, fn() {
+    io.print("a ")
+    print_line("little oak")
+  })
+  assert value == Nil
+  assert text == "a little oak\n"
+}
+
+test "checked output and prompts preserve device failures" {
+  let #(plain, _) = _Probe.capture(True, fn() { io.println("ignored") })
+  assert plain == Nil
+  let #(checked, _) = _Probe.capture(True, fn() { io.try_println("checked") })
+  let assert Error(_) = checked
+  let #(prompt, _) = _Probe.capture(True, fn() { io.prompt("Name: ") })
+  let assert Error(_) = prompt
+  let #(ok, text) = _Probe.capture(False, fn() { io.try_println("checked") })
+  assert ok == Ok(Nil)
+  assert text == "checked\n"
+}
