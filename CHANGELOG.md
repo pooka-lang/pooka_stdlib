@@ -2,7 +2,7 @@
 
 All notable changes to the Pooka standard library are documented in this file.
 
-## Unreleased
+## 0.4.1 - 2026-11-21
 
 ### Changed
 
