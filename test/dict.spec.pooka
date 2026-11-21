@@ -95,12 +95,16 @@ test "structural keys and large map" {
   assert values.size() == 2000
 }
 
-// The methods carry implementation closures, but equality should open the
-// drawers and compare contents. Insertion order must not become part of equality.
-test "dictionary equality compares contents rather than capability closures" {
+// Construction and insertion order must not become part of equality.
+test "dictionary equality compares entries regardless of construction path" {
   let first = dict.from_list([#("a", 1), #("b", 2)])
   let reordered = dict.from_list([#("b", 2), #("a", 1)])
+  let inserted = dict.empty().insert("b", 2).insert("a", 1)
   assert first.equals(reordered)
+  assert first.equals(inserted)
+  assert first == reordered
+  assert first == inserted
+  assert first != inserted.insert("a", 3)
   assert !first.equals(reordered.insert("a", 3))
   assert !first.equals(reordered.delete("a"))
   assert first.filter(fn(_, _) {
@@ -108,6 +112,16 @@ test "dictionary equality compares contents rather than capability closures" {
   }).equals(
     reordered.filter(fn(_, _) { False })
   )
+}
+
+test "a stored None stays distinct from a missing key" {
+  let empty: dict.Dict(String, Option(Int)) = dict.empty()
+  let stored = empty.insert("owl", None)
+  assert empty.get("owl") == None
+  assert stored.get("owl") == Some(None)
+  assert stored.get_or("owl", Some(42)) == None
+  assert stored.has_key("owl")
+  assert stored.delete("owl") == empty
 }
 
 // No entries means no callback visits, even when a transformation changes
