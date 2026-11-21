@@ -36,8 +36,8 @@
     dynamic_wrap/2,
     dynamic_from_pairs/2,
     quotient/2,
-    dict_new/1,
-    dict_from_list/2,
+    dict_new/0,
+    dict_get/2,
     string_points/1,
     string_compare/2,
     string_graphemes/1,
@@ -131,41 +131,15 @@ cons(Values, Value) -> [Value | Values].
 %% ```
 quotient(A, B) -> A div B.
 
-%% Capture an empty map in the typed Storage constructor supplied by Pooka.
-dict_new(Create) -> dict_wrap(#{}, Create).
+%% Supply the empty map behind Dict's typed foreign handle.
+dict_new() -> #{}.
 
-%% Build native map storage from pairs; the final occurrence of a key supplies its value.
-dict_from_list(Pairs, Create) ->
-    dict_wrap(maps:from_list(Pairs), Create).
-
-%% Keep the map behind four capabilities: lookup, enumeration, count and persistent change.
-%% No untyped map crosses the Pooka signature.
-%%
-%% ```erlang
-%% % Lookup(Key) -> {some, Value} | none
-%% % Change(Key, {some, Value}) -> NewStorage
-%% % Change(Key, none) -> StorageWithoutKey
-%% ```
-dict_wrap(Map, Create) ->
-    Create(
-        fun(Key) ->
-            case maps:find(Key, Map) of
-                {ok, Value} -> {some, Value};
-                error -> none
-            end
-        end,
-        fun() -> maps:to_list(Map) end,
-        fun() -> map_size(Map) end,
-        fun(Key, Value) ->
-            dict_wrap(
-                case Value of
-                    {some, V} -> maps:put(Key, V, Map);
-                    none -> maps:remove(Key, Map)
-                end,
-                Create
-            )
-        end
-    ).
+%% Keep a missing key distinct from a stored None.
+dict_get(Map, Key) ->
+    case maps:find(Key, Map) of
+        {ok, Value} -> {some, Value};
+        error -> none
+    end.
 
 %% Valid UTF-8 keeps code point order in its byte representation. Compare the
 %% binaries directly, with no temporary lists, normalization or locale rules.

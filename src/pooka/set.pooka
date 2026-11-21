@@ -17,8 +17,7 @@ module set
 import pooka/dict.{Dict}
 import pooka/list
 
-/// An immutable membership collection. Equality of contents is provided by
-/// equals; storage handles themselves have identity.
+/// An immutable membership collection backed by a dictionary.
 class Set(a) {
   let _values: Dict(a, Nil)
 
@@ -128,8 +127,7 @@ class Set(a) {
     Set(_values.filter(fn(key, _) { !right.contains(key) }))
   }
 
-  /// Compare membership rather than the identity of captured dictionary
-  /// storage.
+  /// Compare membership regardless of insertion order.
   ///
   /// ```pooka
   /// import pooka/set

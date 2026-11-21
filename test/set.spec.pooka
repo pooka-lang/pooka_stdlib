@@ -64,6 +64,7 @@ test "empty set laws" {
 // A set with fewer or different members must still be distinguishable.
 test "set equality ignores order and duplicates" {
   assert set.from_list([1, 2, 1]).equals(set.from_list([2, 1]))
+  assert set.from_list([1, 2, 1]) == set.empty().insert(2).insert(1)
   assert !set.from_list([1, 2]).equals(set.from_list([1]))
   assert !set.from_list([1, 2]).equals(set.from_list([1, 3]))
 }

@@ -2,10 +2,9 @@
 
 //// Keep the keys in a small cabinet whose earlier drawers remain intact.
 ////
-//// Dict wraps native immutable Erlang maps behind typed storage capabilities.
-//// Updates return a new dictionary. Iteration order is unspecified, duplicate
-//// input keys keep their last value, and equals compares contents rather than
-//// closure identities.
+//// A Dict holds one immutable Erlang map. Updates return a new dictionary
+//// without changing the earlier one. Iteration order is unspecified, and
+//// duplicate input keys keep their last value.
 ////
 //// ```pooka
 //// import pooka/dict
@@ -16,16 +15,39 @@
 module dict
 
 import pooka/internal/traversal as list
-import pooka/internal/map.{Storage}
 
-/// An immutable key/value cabinet backed by typed native-map capabilities.
+/// Only the foreign functions supply values of this type. The phantom type
+/// parameters keep keys and values bound to the same map across each call.
+class _Map(k, v) {}
+
+external _Storage from erlang "pooka_stdlib_ffi" {
+  dict_new() -> _Map(k, v)
+
+  dict_get(storage: _Map(k, v), key: k) -> Option(v)
+}
+
+external _Maps from erlang "maps" {
+  put(key: k, value: v, storage: _Map(k, v)) -> _Map(k, v)
+
+  remove(key: k, storage: _Map(k, v)) -> _Map(k, v)
+
+  from_list(pairs: List(#(k, v))) -> _Map(k, v)
+
+  to_list(storage: _Map(k, v)) -> List(#(k, v))
+}
+
+external _Erlang from erlang "erlang" {
+  map_size(storage: _Map(k, v)) -> Int
+}
+
+/// An immutable key/value cabinet backed by a typed native map.
 /// Prefer empty and from_list when constructing public dictionaries.
 class Dict(k, v) {
-  let _storage: Storage(k, v)
+  let _storage: _Map(k, v)
 
   /// Create the value from its declared fields. Public factory functions keep
   /// the storage details out of ordinary calling code.
-  new(storage: Storage(k, v)) {
+  new(storage: _Map(k, v)) {
     self._storage = storage
   }
 
@@ -37,7 +59,7 @@ class Dict(k, v) {
   /// assert dict.from_list([#("oak", 1)]).get("oak") == Some(1)
   /// ```
   get(key: k) -> Option(v) {
-    _storage.get(key)
+    _Storage.dict_get(_storage, key)
   }
 
   /// Return a dictionary with the key associated to the new value.
@@ -48,7 +70,7 @@ class Dict(k, v) {
   /// assert dict.empty().insert("oak", 2).get("oak") == Some(2)
   /// ```
   insert(key: k, value: v) -> Dict(k, v) {
-    Dict(_storage.change(key, Some(value)))
+    Dict(_Maps.put(key, value, _storage))
   }
 
   /// Return a dictionary without the key. Removing an absent key is harmless.
@@ -59,7 +81,7 @@ class Dict(k, v) {
   /// assert dict.from_list([#("oak", 1)]).delete("oak").is_empty()
   /// ```
   delete(key: k) -> Dict(k, v) {
-    Dict(_storage.change(key, None))
+    Dict(_Maps.remove(key, _storage))
   }
 
   /// Read a key or return the supplied fallback. An existing value is kept.
@@ -70,7 +92,7 @@ class Dict(k, v) {
   /// assert dict.empty().get_or("owl", 0) == 0
   /// ```
   get_or(key: k, fallback: v) -> v {
-    match _storage.get(key) {
+    match _Storage.dict_get(_storage, key) {
       Some(value) -> value
       None -> fallback
     }
@@ -86,7 +108,7 @@ class Dict(k, v) {
   /// assert dict.empty().upsert("owl", fn(_) { 1 }).get("owl") == Some(1)
   /// ```
   upsert(key: k, change: fn(Option(v)) -> v) -> Dict(k, v) {
-    insert(key, change(_storage.get(key)))
+    insert(key, change(_Storage.dict_get(_storage, key)))
   }
 
   /// Check membership without exposing the stored value.
@@ -97,7 +119,7 @@ class Dict(k, v) {
   /// assert dict.from_list([#("oak", 1)]).has_key("oak")
   /// ```
   has_key(key: k) -> Bool {
-    match _storage.get(key) {
+    match _Storage.dict_get(_storage, key) {
       Some(_) -> True
       None -> False
     }
@@ -111,7 +133,7 @@ class Dict(k, v) {
   /// assert dict.from_list([#("oak", 1)]).size() == 1
   /// ```
   size() -> Int {
-    _storage.size()
+    _Erlang.map_size(_storage)
   }
 
   /// Ask whether no keys are stored.
@@ -122,7 +144,7 @@ class Dict(k, v) {
   /// assert dict.empty().is_empty()
   /// ```
   is_empty() -> Bool {
-    _storage.size() == 0
+    _Erlang.map_size(_storage) == 0
   }
 
   /// Enumerate keys in unspecified order.
@@ -134,7 +156,7 @@ class Dict(k, v) {
   /// assert list.contains(dict.from_list([#("oak", 1)]).keys(), "oak")
   /// ```
   keys() -> List(k) {
-    list.map(_storage.pairs(), fn(pair) {
+    list.map(_Maps.to_list(_storage), fn(pair) {
       let #(key, _) = pair
       key
     })
@@ -149,7 +171,7 @@ class Dict(k, v) {
   /// assert list.contains(dict.from_list([#("oak", 1)]).values(), 1)
   /// ```
   values() -> List(v) {
-    list.map(_storage.pairs(), fn(pair) {
+    list.map(_Maps.to_list(_storage), fn(pair) {
       let #(_, value) = pair
       value
     })
@@ -164,7 +186,7 @@ class Dict(k, v) {
   /// assert list.contains(dict.from_list([#("oak", 1)]).to_list(), #("oak", 1))
   /// ```
   to_list() -> List(#(k, v)) {
-    _storage.pairs()
+    _Maps.to_list(_storage)
   }
 
   /// Transform each value while retaining keys. The value type may change.
@@ -175,7 +197,7 @@ class Dict(k, v) {
   /// assert dict.from_list([#("oak", 1)]).map_values(fn(x) { x == 1 }).get("oak") == Some(True)
   /// ```
   map_values(transform: fn(v) -> b) -> Dict(k, b) {
-    _storage.pairs()
+    _Maps.to_list(_storage)
     |> list.map(fn(pair) {
       let #(key, value) = pair
       #(key, transform(value))
@@ -191,7 +213,7 @@ class Dict(k, v) {
   /// assert dict.from_list([#("oak", 1)]).filter(fn(_, value) { value > 1 }).is_empty()
   /// ```
   filter(keep: fn(k, v) -> Bool) -> Dict(k, v) {
-    _storage.pairs()
+    _Maps.to_list(_storage)
     |> list.filter(fn(pair) {
       let #(key, value) = pair
       keep(key, value)
@@ -207,13 +229,13 @@ class Dict(k, v) {
   /// assert dict.from_list([#("oak", 2)]).fold(0, fn(acc, _, value) { acc + value }) == 2
   /// ```
   fold(initial: b, step: fn(b, k, v) -> b) -> b {
-    list.fold(_storage.pairs(), initial, fn(acc, pair) {
+    list.fold(_Maps.to_list(_storage), initial, fn(acc, pair) {
       let #(key, value) = pair
       step(acc, key, value)
     })
   }
 
-  /// Compare keys and values, independent of storage closure identity.
+  /// Compare keys and values regardless of insertion order.
   ///
   /// ```pooka
   /// import pooka/dict
@@ -221,10 +243,7 @@ class Dict(k, v) {
   /// assert dict.from_list([#("oak", 1)]).equals(dict.from_list([#("oak", 1)]))
   /// ```
   equals(right: Dict(k, v)) -> Bool {
-    _storage.size() == right.size() && list.all(_storage.pairs(), fn(pair) {
-      let #(key, value) = pair
-      right.get(key) == Some(value)
-    })
+    _storage == right._storage
   }
 
   /// Merge dictionaries, taking the right-hand value for a shared key.
@@ -235,7 +254,7 @@ class Dict(k, v) {
   /// assert dict.from_list([#("oak", 1)]).merge(dict.from_list([#("oak", 2)])).get("oak") == Some(2)
   /// ```
   merge(right: Dict(k, v)) -> Dict(k, v) {
-    _storage.pairs()
+    _Maps.to_list(_storage)
     |> list.concat(right.to_list())
     |> from_list()
   }
@@ -299,7 +318,7 @@ class Dict(k, v) {
 /// assert dict.empty().is_empty()
 /// ```
 empty() -> Dict(k, v) {
-  Dict(map.empty())
+  Dict(_Storage.dict_new())
 }
 
 /// Build a dictionary from pairs. For repeated keys, the last pair wins.
@@ -310,5 +329,5 @@ empty() -> Dict(k, v) {
 /// assert dict.from_list([#("oak", 1), #("oak", 2)]).get("oak") == Some(2)
 /// ```
 from_list(pairs: List(#(k, v))) -> Dict(k, v) {
-  Dict(map.from_list(pairs))
+  Dict(_Maps.from_list(pairs))
 }
